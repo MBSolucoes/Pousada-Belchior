@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Pousada Belchior" />
+  <title>🏖️ Pousada Belchior</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <style>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;padding:0;background:#F8F5F0;font-family:Georgia,serif}
+    input,select,button{font-family:Georgia,serif}
+    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar-thumb{background:#ccc;border-radius:4px}
+    .toast{
+      position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+      background:#1a3a5c;color:#fff;padding:12px 24px;
+      border-radius:30px;font-size:14px;font-weight:700;
+      box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:9999;
+      animation:fadeUp .3s ease;white-space:nowrap
+    }
+    @keyframes fadeUp{
+      from{opacity:0;transform:translateX(-50%) translateY(16px)}
+      to{opacity:1;transform:translateX(-50%) translateY(0)}
+    }
+    .app-frozen{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+    .app-frozen-body{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;max-width:700px;margin:0 auto;padding:14px 12px 0}
+    .scroll-area{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px}
+    @page{margin:14mm}
+    @media print{
+      body{background:#fff!important}
+      .no-print{display:none!important}
+      #recibo{box-shadow:none!important;border:1px solid #000!important;margin:0!important;max-width:none!important}
+    }
+    @media(max-width:600px){
+      .casas-grid{grid-template-columns:1fr!important}
+      .form-grid{grid-template-columns:1fr 1fr!important}
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+'use strict';
+
+/* ─── aliases ─────────────────────────────────────────────────────────── */
+const { useState, useMemo, useEffect, useCallback } = React;
+const ce = React.createElement;
+
+/* ─── constantes ─────────────────────────────────────────────────────── */
+const CASAS = [
+  { nome:'Casa 01', cor:'#3B82F6', bg:'#EFF6FF' },
+  { nome:'Casa 02', cor:'#10B981', bg:'#ECFDF5' },
+  { nome:'Casa 03', cor:'#F59E0B', bg:'#FFFBEB' },
+  { nome:'Casa 04', cor:'#EF4444', bg:'#FEF2F2' },
+];
+const STORAGE_KEY = 'pousada_belchior_v1';
+
+/* ── NUVEM (Firebase) ─────────────────────────────────────────────────────
+   Cole abaixo o firebaseConfig do projeto. Enquanto for null, o app funciona só neste aparelho.
+   Exemplo:  const FIREBASE_CONFIG = { apiKey:'...', authDomain:'xxx.firebaseapp.com', projectId:'xxx', appId:'...' };  */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA7KixS6OlxwPqew85mEus1ezbGG-EoNjA",
+  authDomain: "pousada-belchior.firebaseapp.com",
+  projectId: "pousada-belchior",
+  storageBucket: "pousada-belchior.firebasestorage.app",
+  messagingSenderId: "439216267552",
+  appId: "1:439216267552:web:e13f84732d1f77f5657745"
+};
+const EMAIL_APP   = 'pousada@belchior.app';     /* usuário único criado no Firebase Authentication */
+const derivar     = s => s + '#belchior';       /* o Firebase exige 6+ caracteres: a senha digitada ganha esse sufixo */
+const NUVEM       = !!FIREBASE_CONFIG;
+const COLECAO     = 'pousada_alugueis';
+const MIGRADO_KEY = 'pousada_belchior_migrado';
+let fb = null;
+if (NUVEM && window.firebase) {
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fb = { auth: firebase.auth(), db: firebase.firestore() };
+    fb.db.enablePersistence({ synchronizeTabs:true }).catch(() => {});
+  } catch (_) { fb = null; }
+}
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+/* ─── helpers ────────────────────────────────────────────────────────── */
+const brl = v => (v || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+/* "1500" => 1500 | "1.500,50" => 1500.5 | "R$ 1.500,00" => 1500 */
+function parseValor(s) {
+  s = String(s || '').replace(/[^\d.,]/g, '');
+  if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+}
+const D       = s => new Date(s + 'T00:00:00Z');
+const dias    = (a, b) => (a && b) ? Math.round((D(b) - D(a)) / 864e5) + 1 : 0; /* 1º dia 00:00 até último dia 23:59 */
+const dataBR  = s => s.split('-').reverse().join('/');
+const totalR  = r => Math.round(dias(r.de, r.ate) * r.diaria * 100) / 100;
+const restaR  = r => r.quit ? 0 : Math.max(0, totalR(r) - r.sinal);
+const p2      = n => String(n).padStart(2, '0');
+
+/* ─── storage ─────────────────────────────────────────────────────────── */
+function loadDados() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return [];
+}
+
+/* ─── Toast ───────────────────────────────────────────────────────────── */
+function Toast({ msg, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2400);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return ce('div', { className:'toast' }, msg);
+}
+
+/* ─── campo de texto/valor ───────────────────────────────────────────── */
+const inputStyle = { width:'100%', padding:'10px 12px', borderRadius:9, border:'2px solid #e5e7eb', fontSize:14, outline:'none', background:'#fff' };
+function Campo({ label, children, full }) {
+  return ce('label', { style:{ display:'block', gridColumn: full ? '1 / -1' : 'auto' } },
+    ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, label),
+    children
+  );
+}
+
+/* ─── card de uma casa ───────────────────────────────────────────────── */
+/* dias livres/ocupados de uma casa em um mês (1º ao último dia, inclusive) */
+function vagasMes(regs, ano, mes) {
+  const nDias = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
+  const ocu = new Set();
+  regs.forEach(r => {
+    for (let t = D(r.de); t <= D(r.ate); t = new Date(+t + 864e5))
+      if (t.getUTCFullYear() === ano && t.getUTCMonth() === mes) ocu.add(t.getUTCDate());
+  });
+  const faixas = [];
+  for (let d = 1; d <= nDias; d++) if (!ocu.has(d)) {
+    const l = faixas[faixas.length - 1];
+    if (l && l[1] === d - 1) l[1] = d; else faixas.push([d, d]);
+  }
+  return { nDias, ocu, faixas, livres: nDias - ocu.size };
+}
+const FORM0 = { nome:'', de:'', ate:'', dia:'', sin:'' };
+const formDe = r => ({ nome:r.nome, de:r.de, ate:r.ate, dia:brl(r.diaria), sin: r.sinal ? brl(r.sinal) : '' });
+function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir, onVoltar, onRecibo }) {
+  const c = CASAS[idx];
+  const [f, setF] = useState(pre && pre.edit ? formDe(pre.edit) : pre ? { ...FORM0, de: pre.de, ate: pre.ate } : FORM0);
+  const [editId, setEditId] = useState(pre && pre.edit ? pre.edit.id : null);
+  const formRef = React.useRef(null);
+  const hj = new Date();
+  const [ym, setYm] = useState(hj.getFullYear() * 12 + hj.getMonth());
+  useEffect(() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(f.de)) { const [y, m] = f.de.split('-'); setYm(+y * 12 + (+m - 1)); }
+  }, [f.de]);
+  const vano = Math.floor(ym / 12), vmes = ym % 12;
+  const vg   = vagasMes(regs, vano, vmes);
+  const iso  = d => vano + '-' + p2(vmes + 1) + '-' + p2(d);
+  const escolher = fx => setF(prev => ({ ...prev, de: iso(fx[0]), ate: iso(fx[1]) }));
+  /* na tela inicial a faixa abre o lançamento da casa já com as datas; dentro do lançamento só preenche */
+  const clickFaixa = fx => modo === 'resumo' ? onAbrir(idx, iso(fx[0]), iso(fx[1])) : escolher(fx);
+  const navBtn = { width:34, height:30, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:16, fontWeight:700, cursor:'pointer' };
+  const set  = k => e => setF(prev => ({ ...prev, [k]: e.target.value }));
+  const money = k => ({
+    value: f[k], inputMode:'decimal', enterKeyHint: k === 'sin' ? 'done' : 'next',
+    onChange: set(k),
+    onFocus: () => { const n = parseValor(f[k]); if (f[k]) setF(p => ({ ...p, [k]: n ? String(n).replace('.', ',') : '' })); },
+    onBlur:  () => { if (f[k]) setF(p => ({ ...p, [k]: brl(parseValor(f[k])) })); },
+  });
+  const n      = Math.max(0, dias(f.de, f.ate));
+  const diaria = parseValor(f.dia), sinal = parseValor(f.sin);
+  const total  = Math.round(n * diaria * 100) / 100;
+  const resta  = Math.max(0, total - sinal);
+  const pend   = regs.filter(r => !r.quit).length;
+
+  const lancar = () => {
+    if (!f.nome.trim())            return onAdd(null, 'Informe o nome de quem alugou');
+    if (!f.de || !f.ate || n < 1)  return onAdd(null, 'A data final não pode ser anterior à inicial');
+    if (!diaria)                   return onAdd(null, 'Informe o valor da diária');
+    if (sinal > total)             return onAdd(null, 'O sinal não pode ser maior que o total');
+    const choque = regs.some(r => r.id !== editId && f.de <= r.ate && f.ate >= r.de);
+    if (choque && !confirm('Este período se sobrepõe a outro aluguel desta casa. Lançar mesmo assim?')) return;
+    if (editId) { onEdit(editId, { nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal }); setEditId(null); setF(FORM0); return; }
+    onAdd({ id: Date.now().toString(36), casa: idx, nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal, quit: sinal >= total });
+    setF(FORM0);
+  };
+
+  /* Enter do celular: avança para o próximo campo; no último, lança o aluguel */
+  const onEnter = e => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    e.preventDefault();
+    const els = Array.from(formRef.current.querySelectorAll('input'));
+    const i = els.indexOf(e.target);
+    if (i < els.length - 1) {
+      const nx = els[i + 1];
+      nx.focus();
+      if (nx.type === 'date') { try { nx.showPicker && nx.showPicker(); } catch (_) {} }
+    } else { e.target.blur(); lancar(); }
+  };
+
+  const ordenados = [...regs].sort((a, b) => a.de < b.de ? -1 : a.de > b.de ? 1 : 0);
+  const comecarEdicao = r => {
+    setEditId(r.id); setF(formDe(r));
+    setTimeout(() => { if (formRef.current) formRef.current.scrollIntoView({ behavior:'smooth', block:'center' }); }, 60);
+  };
+
+  const cardStyle = { background:'#fff', borderRadius:14, padding:18, boxShadow:'0 2px 12px rgba(0,0,0,.06)', borderTop:'4px solid ' + c.cor };
+  const titulo =
+    ce('div', { style: modo === 'resumo' ? { display:'flex', flexDirection:'column', alignItems:'center', gap:8, marginBottom:12 } : { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 } },
+      modo === 'resumo'
+        ? ce('button', { onClick:() => onAbrir(idx), style:{ padding:'10px 22px', borderRadius:999, border:'none', background:c.cor, color:'#fff', fontSize:17, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(0,0,0,.15)' } }, '🏠 ' + c.nome)
+        : ce('div', { style:{ fontWeight:700, fontSize:18, color:'#1a3a5c' } }, '🏠 ' + c.nome),
+      regs.length > 0 && ce('span', { style:{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20,
+        background: pend ? '#fffbeb' : '#ecfdf5', color: pend ? '#b45309' : '#059669', border:'1px solid ' + (pend ? '#f59e0b' : '#10b981') } },
+        pend ? '⏳ ' + pend + ' pendente(s)' : '✅ Tudo quitado')
+    );
+  const vagas =
+    ce('div', { style:{ background:c.bg, borderRadius:10, padding:'10px 12px', marginBottom:12 } },
+      ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:6, marginBottom:8 } },
+        ce('button', { onClick:() => setYm(y => y - 1), style:navBtn }, '‹'),
+        ce('div', { style:{ fontSize:12, fontWeight:700, color:'#1a3a5c', textAlign:'center' } },
+          '📅 Vagas em ' + MESES[vmes] + ' ' + vano, ce('div', { style:{ fontWeight:400, color:'#666' } }, vg.livres + ' de ' + vg.nDias + ' dias livres')),
+        ce('button', { onClick:() => setYm(y => y + 1), style:navBtn }, '›')),
+      vg.faixas.length
+        ? ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:6 } },
+            ...vg.faixas.map(fx => ce('button', { key:fx[0], onClick:() => clickFaixa(fx),
+              style:{ padding:'6px 12px', borderRadius:20, border:'1px solid ' + c.cor, background:'#fff', color:'#059669', fontSize:12, fontWeight:700, cursor:'pointer' } },
+              fx[0] === fx[1] ? p2(fx[0]) : p2(fx[0]) + ' a ' + p2(fx[1]))))
+        : ce('div', { style:{ fontSize:12, color:'#dc2626', fontWeight:700 } }, 'Sem vagas neste mês'),
+      vg.faixas.length > 0 && ce('div', { style:{ fontSize:10, color:'#999', marginTop:6 } }, (modo === 'resumo' ? 'Toque em uma faixa para lançar nesse período' : 'Toque em uma faixa para preencher "De" e "Até"'))
+    );
+  if (modo === 'resumo') return ce('div', { style:cardStyle }, titulo, vagas);
+  const voltar = ce('button', { onClick:onVoltar, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar');
+  return ce('div', { style:cardStyle }, voltar, titulo, vagas,
+    editId && ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } },
+      '✏️ Editando aluguel',
+      ce('button', { onClick:() => { setEditId(null); setF(FORM0); }, style:{ padding:'6px 12px', borderRadius:8, border:'1px solid #93c5fd', background:'#fff', color:'#1e40af', fontSize:12, fontWeight:700, cursor:'pointer' } }, 'Cancelar')),
+    /* formulário */
+    ce('div', { ref:formRef, onKeyDown:onEnter, className:'form-grid', style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 } },
+      ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'next' })),
+      ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:set('de') })),
+      ce(Campo, { label:'Até' }, ce('input', { style:inputStyle, type:'date', value:f.ate, onChange:set('ate') })),
+      ce(Campo, { label:'Valor da diária' },   ce('input', { style:inputStyle, placeholder:'Ex.: 300', ...money('dia') })),
+      ce(Campo, { label:'Sinal da reserva' },  ce('input', { style:inputStyle, placeholder:'Ex.: 500', ...money('sin') }))
+    ),
+    /* prévia */
+    ce('div', { style:{ display:'flex', gap:6, margin:'12px 0' } },
+      ...[[n + (n === 1 ? ' dia' : ' dias'), '#1a3a5c', 'período'], [brl(total), '#1a3a5c', 'total'], [brl(resta), resta ? '#dc2626' : '#059669', 'a quitar']].map(([v, cor, l]) =>
+        ce('div', { key:l, style:{ flex:1, background:c.bg, borderRadius:8, padding:'8px 4px', textAlign:'center' } },
+          ce('div', { style:{ fontWeight:700, fontSize:13, color:cor } }, v),
+          ce('div', { style:{ fontSize:10, color:'#888', marginTop:1 } }, l)))
+    ),
+    ce('button', { onClick:lancar, style:{ width:'100%', padding:12, borderRadius:10, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' } }, editId ? '💾 Salvar alterações' : '📥 Lançar aluguel'),
+    /* lançamentos */
+    ce('div', { style:{ marginTop:14 } },
+      ordenados.length === 0
+        ? ce('div', { style:{ textAlign:'center', padding:'14px 0', color:'#bbb', fontSize:13 } }, '📭 Nenhum aluguel lançado')
+        : ordenados.map(r => ce('div', { key:r.id, style:{ padding:'10px 12px', marginBottom:8, borderRadius:10, background: r.quit ? '#ecfdf5' : '#fffbeb', border:'1px solid ' + (r.quit ? '#10b981' : '#f59e0b') } },
+            ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center' } },
+              ce('span', { style:{ fontWeight:700, fontSize:14, color:'#1a3a5c' } }, r.nome),
+              ce('span', { style:{ fontWeight:700, fontSize:12, color: r.quit ? '#059669' : '#b45309' } }, r.quit ? '✅ Concluído' : '⏳ Pendente')),
+            ce('div', { style:{ fontSize:12, color:'#666', margin:'4px 0' } }, dataBR(r.de) + ' a ' + dataBR(r.ate) + ' · ' + dias(r.de, r.ate) + ' dias × ' + brl(r.diaria)),
+            ce('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#444' } },
+              ce('span', null, 'Total ' + brl(totalR(r))),
+              ce('span', null, 'Sinal ' + brl(r.sinal)),
+              ce('span', { style:{ fontWeight:700, color: r.quit ? '#059669' : '#dc2626' } }, 'Resta ' + brl(restaR(r)))),
+            ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 } },
+              ce('button', { onClick:() => onQuit(r.id), style:{ flex:'1 1 100%', padding:8, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, r.quit ? '↩️ Reabrir' : '💰 Marcar quitado'),
+              ce('button', { onClick:() => comecarEdicao(r), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, '✏️ Editar'),
+              ce('button', { onClick:() => onRecibo(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🧾 Recibo'),
+              ce('button', { onClick:() => onDel(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🗑️'))
+          ))
+    )
+  );
+}
+
+/* ─── recibos ─────────────────────────────────────────────────────────── */
+function extenso(v) {
+  const U = ['zero','um','dois','três','quatro','cinco','seis','sete','oito','nove','dez','onze','doze','treze','quatorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
+  const Dz = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
+  const C = ['','cento','duzentos','trezentos','quatrocentos','quinhentos','seiscentos','setecentos','oitocentos','novecentos'];
+  const ate999 = n => {
+    if (n === 100) return 'cem';
+    const c = Math.floor(n / 100), r = n % 100, p = [];
+    if (c) p.push(C[c]);
+    if (r) { if (r < 20) p.push(U[r]); else { const d = Math.floor(r / 10), u = r % 10; p.push(Dz[d] + (u ? ' e ' + U[u] : '')); } }
+    return p.join(' e ');
+  };
+  const inteiro = n => {
+    if (n === 0) return 'zero';
+    const mi = Math.floor(n / 1e6), mil = Math.floor((n % 1e6) / 1000), r = n % 1000, p = [];
+    if (mi) p.push(ate999(mi) + (mi === 1 ? ' milhão' : ' milhões'));
+    if (mil) p.push(mil === 1 ? 'mil' : ate999(mil) + ' mil');
+    if (r) p.push(ate999(r));
+    if (p.length === 1) return p[0];
+    const ult = p.pop();
+    return p.join(', ') + ((r && r < 100) || r % 100 === 0 || !r ? ' e ' : ', ') + ult;
+  };
+  const reais = Math.floor(v + 1e-9), cents = Math.round((v - reais) * 100);
+  const partes = [];
+  if (reais > 0) partes.push(inteiro(reais) + (reais === 1 ? ' real' : ' reais'));
+  if (cents > 0) partes.push(inteiro(cents) + (cents === 1 ? ' centavo' : ' centavos'));
+  return partes.length ? partes.join(' e ') : 'zero real';
+}
+const validos  = r => { const tot = totalR(r), rest = Math.max(0, tot - r.sinal); return { sinal: r.sinal > 0, quit: r.quit && rest > 0, total: r.quit && tot > 0 }; };
+const tipoPadrao = r => { const v = validos(r); return (v.quit && r.sinal > 0) ? 'quit' : v.total ? 'total' : 'sinal'; };
+const estavel  = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
+const SEQ_KEY  = 'pousada_belchior_recibo_seq';
+const seqSalva = () => { try { return parseInt(localStorage.getItem(SEQ_KEY) || '0', 10) || 0; } catch (_) { return 0; } };
+const proxNum  = dados => Math.max(seqSalva(), ...dados.flatMap(r => Object.values(r.rec || {}).map(x => x.n))) + 1;
+const isoHoje  = () => { const t = new Date(); return t.getFullYear() + '-' + p2(t.getMonth() + 1) + '-' + p2(t.getDate()); };
+const dataLonga = iso => { const [y, m, d] = iso.split('-'); return (+d) + ' de ' + MESES[+m - 1].toLowerCase() + ' de ' + y; };
+const EMIT_KEY = 'pousada_belchior_emitente';
+
+/* ─── componente principal ───────────────────────────────────────────── */
+function App() {
+  const hoje = new Date();
+  const [dados, setDados] = useState(loadDados);
+  const [sessao, setSessao] = useState(NUVEM ? (fb ? 'carregando' : 'semsdk') : 'ok');   /* carregando | login | ok | semsdk */
+  const [loginSenha, setLoginSenha] = useState('');
+  const [loginErro,  setLoginErro]  = useState('');
+  const [entrando,   setEntrando]   = useState(false);
+  const dadosRef   = React.useRef(dados); dadosRef.current = dados;
+  const syncRef    = React.useRef(null);   /* id -> json já enviado/recebido (null até o 1º retorno da nuvem) */
+  const cfgSyncRef = React.useRef('');
+  const cfgPronto  = React.useRef(false);
+  const numPendRef = React.useRef({});
+  const [aba,   setAba]   = useState('casas');
+  const [ano,   setAno]   = useState(hoje.getFullYear());
+  const [mes,   setMes]   = useState(hoje.getMonth());
+  const [toast, setToast] = useState(null);
+  const [aberta, setAberta] = useState(null);
+  const [lista,  setLista]  = useState(null);   /* 'alugueis' | 'pendentes' | null */
+  const [recibo, setRecibo] = useState(null);   /* { id, tipo: 'sinal' | 'quit' | 'total' } | null */
+  const [cfgAberto, setCfgAberto] = useState(false);
+  const [cfg, setCfg] = useState(() => {
+    try { const x = JSON.parse(localStorage.getItem(EMIT_KEY) || 'null'); if (x) return x; } catch (_) {}
+    return { nome:'Pousada Belchior', doc:'', end:'', cidade:'' };
+  });
+  const reciboRef = React.useRef(null);
+
+  /* botão voltar do celular: qualquer tela fora do início empilha um passo no histórico */
+  const pushedRef = React.useRef(false);
+  const modalRef  = React.useRef(null);
+  const empilhar = () => { if (pushedRef.current) return; try { history.pushState({ pb:1 }, ''); pushedRef.current = true; } catch (_) {} };
+  const irInicio = () => { if (pushedRef.current) history.back(); else { setAberta(null); setLista(null); setAba('casas'); } };
+  const abrirLista = tipo => { setLista(tipo); setAberta(null); empilhar(); window.scrollTo(0, 0); };
+  const abrirRecibo = id => { const r = dados.find(x => x.id === id); setRecibo({ id, tipo: tipoPadrao(r) }); window.scrollTo(0, 0); };
+  const fecharRecibo = () => { if (pushedRef.current) history.back(); else setRecibo(null); };
+  const [modalExcluir, setModalExcluir] = useState(null);
+  const [senhaInput,   setSenhaInput]   = useState('');
+  const [senhaErro,    setSenhaErro]    = useState(false);
+  modalRef.current = modalExcluir;
+  reciboRef.current = recibo;
+
+  useEffect(() => {
+    const onPop = () => {
+      if (modalRef.current) {            /* voltar com o pedido de senha aberto: só fecha */
+        setModalExcluir(null); setSenhaInput(''); setSenhaErro(false);
+        try { history.pushState({ pb:1 }, ''); pushedRef.current = true; } catch (_) {}
+        return;
+      }
+      if (reciboRef.current) {           /* voltar com o recibo aberto: fecha o recibo e fica na tela anterior */
+        setRecibo(null);
+        try { history.pushState({ pb:1 }, ''); pushedRef.current = true; } catch (_) {}
+        return;
+      }
+      pushedRef.current = false; setAberta(null); setLista(null); setAba('casas');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  /* dados do emitente */
+  useEffect(() => { try { localStorage.setItem(EMIT_KEY, JSON.stringify(cfg)); } catch (_) {} }, [cfg]);
+
+  /* ── nuvem: login ── */
+  useEffect(() => {
+    if (!fb) return;
+    return fb.auth.onAuthStateChanged(u => { setSessao(u ? 'ok' : 'login'); if (!u) { syncRef.current = null; cfgPronto.current = false; } });
+  }, []);
+
+  /* ── nuvem: recebe os aluguéis (tempo real) ── */
+  useEffect(() => {
+    if (!fb || sessao !== 'ok') return;
+    return fb.db.collection(COLECAO).onSnapshot(snap => {
+      const lista = snap.docs.map(d => d.data());
+      let migrado = false; try { migrado = !!localStorage.getItem(MIGRADO_KEY); } catch (_) {}
+      try { localStorage.setItem(MIGRADO_KEY, '1'); } catch (_) {}
+      if (syncRef.current === null && !migrado && lista.length === 0 && dadosRef.current.length > 0) {
+        syncRef.current = new Map();      /* nuvem vazia na 1ª vez: sobe os dados que já estavam neste aparelho */
+        setDados(d => [...d]);
+        return;
+      }
+      syncRef.current = new Map(lista.map(r => [r.id, estavel(r)]));
+      setDados(lista);
+    }, () => setToast('⚠️ Sem acesso aos dados na nuvem'));
+  }, [sessao]);
+
+  /* ── nuvem: envia o que mudou (novo/alterado/excluído) ── */
+  useEffect(() => {
+    if (!fb || sessao !== 'ok' || syncRef.current === null) return;
+    const mapa = syncRef.current, ids = new Set();
+    dados.forEach(r => {
+      ids.add(r.id);
+      const j = estavel(r);
+      if (mapa.get(r.id) !== j) { mapa.set(r.id, j); fb.db.collection(COLECAO).doc(r.id).set(r).catch(() => setToast('⚠️ Não foi possível salvar na nuvem')); }
+    });
+    [...mapa.keys()].forEach(id => { if (!ids.has(id)) { mapa.delete(id); fb.db.collection(COLECAO).doc(id).delete().catch(() => {}); } });
+  }, [dados, sessao]);
+
+  /* ── nuvem: dados do emitente compartilhados ── */
+  useEffect(() => {
+    if (!fb || sessao !== 'ok') return;
+    return fb.db.doc('pousada_config/emitente').onSnapshot(sn => {
+      cfgPronto.current = true;
+      if (!sn.exists) { cfgSyncRef.current = ''; setCfg(c => ({ ...c })); return; }
+      const d = sn.data(); cfgSyncRef.current = estavel(d); setCfg(d);
+    }, () => {});
+  }, [sessao]);
+  useEffect(() => {
+    if (!fb || sessao !== 'ok' || !cfgPronto.current) return;
+    const j = estavel(cfg);
+    if (j === cfgSyncRef.current) return;
+    cfgSyncRef.current = j;
+    fb.db.doc('pousada_config/emitente').set(cfg).catch(() => {});
+  }, [cfg, sessao]);
+
+  /* numeração: o recibo recebe número e data na primeira vez que é aberto e depois não muda.
+     Na nuvem o número vem de um contador único (transação), para dois celulares nunca repetirem. */
+  useEffect(() => {
+    if (!recibo) return;
+    const tipo = recibo.tipo;
+    const r = dados.find(x => x.id === recibo.id);
+    if (!r || !validos(r)[tipo] || (r.rec && r.rec[tipo])) return;
+    const d = isoHoje();
+    const aplicar = n => setDados(prev => prev.map(x => x.id === r.id && !(x.rec && x.rec[tipo]) ? { ...x, rec: { ...(x.rec || {}), [tipo]: { n, d } } } : x));
+    if (fb && sessao === 'ok') {
+      const chave = r.id + tipo;
+      if (numPendRef.current[chave]) return;
+      numPendRef.current[chave] = true;
+      const ref = fb.db.doc('pousada_config/recibos');
+      fb.db.runTransaction(async t => {
+        const sn = await t.get(ref);
+        const n = Math.max(sn.exists ? sn.data().ultimo : 0, seqSalva()) + 1;
+        t.set(ref, { ultimo:n });
+        return n;
+      }).then(n => { try { localStorage.setItem(SEQ_KEY, String(n)); } catch (_) {} aplicar(n); })
+        .catch(() => setToast('⚠️ Sem internet: não foi possível numerar o recibo'))
+        .finally(() => { delete numPendRef.current[chave]; });
+      return;
+    }
+    const n = proxNum(dados);
+    try { localStorage.setItem(SEQ_KEY, String(n)); } catch (_) {}
+    aplicar(n);
+  }, [recibo, dados, sessao]);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dados)); } catch (_) {}
+  }, [dados]);
+
+  const pendentes = dados.filter(r => !r.quit).length;
+  const mesAtual0 = hoje.getFullYear() + '-' + p2(hoje.getMonth() + 1) + '-01';   /* 1º dia do mês corrente */
+  const doMesEFuturos = dados.filter(r => r.ate >= mesAtual0);
+  const aReceber  = dados.reduce((a, r) => a + restaR(r), 0);
+
+  const adicionar = useCallback((r, erro) => {
+    if (!r) return setToast('⚠️ ' + erro);
+    setDados(prev => [...prev, r]);
+    setToast('✅ Aluguel de ' + r.nome + ' lançado na ' + CASAS[r.casa].nome + '!');
+  }, []);
+  const alternarQuit = id => {
+    const r = dados.find(x => x.id === id);
+    if (r && r.quit && r.sinal >= totalR(r)) return setToast('ℹ️ O sinal já cobre o total: não há saldo para reabrir');
+    setDados(prev => prev.map(x => x.id === id ? { ...x, quit: !x.quit } : x));
+  };
+  /* salvar edição: se o sinal passa a cobrir o total o aluguel conclui; se deixava de cobrir, volta a pendente */
+  const editar = (id, c) => {
+    setDados(prev => prev.map(x => {
+      if (x.id !== id) return x;
+      const antes = x.sinal >= totalR(x), agora = c.sinal >= totalR(c);
+      return { ...x, ...c, quit: agora ? true : antes ? false : x.quit };
+    }));
+    setToast('✏️ Aluguel atualizado!');
+  };
+  const abrirEdicao = r => { setAba('casas'); setLista(null); setAberta({ idx:r.casa, de:'', ate:'', edit:r }); empilhar(); window.scrollTo(0, 0); };
+  const pedirExclusao = id => {
+    if (!fb) { if (confirm('Excluir este lançamento?')) { setDados(prev => prev.filter(r => r.id !== id)); setToast('🗑️ Lançamento removido.'); } return; }
+    setModalExcluir(id); setSenhaInput(''); setSenhaErro(false);
+  };
+  const confirmarExclusao = () => {
+    const apagar = () => { setDados(prev => prev.filter(r => r.id !== modalExcluir)); setModalExcluir(null); setSenhaInput(''); setToast('🗑️ Lançamento removido.'); };
+    fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senhaInput)).then(apagar).catch(() => setSenhaErro(true));
+  };
+  const entrar = () => {
+    if (!loginSenha || entrando) return;
+    setEntrando(true); setLoginErro('');
+    fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(loginSenha))
+      .then(() => setLoginSenha(''))
+      .catch(e => setLoginErro(/network/.test(e.code || '') ? 'Sem conexão com a internet' : 'Senha incorreta'))
+      .finally(() => setEntrando(false));
+  };
+  const sair = () => { fb.auth.signOut(); };
+
+  /* ── header ── */
+  function renderHeader() {
+    return ce('div', { style:{ position:'relative', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', padding:'20px 16px 16px', boxShadow:'0 4px 20px rgba(0,0,0,.3)' } },
+      fb && ce('button', { onClick:sair, style:{ position:'absolute', top:8, right:8, padding:'5px 10px', borderRadius:999, border:'1px solid rgba(255,255,255,.35)', background:'rgba(0,0,0,.25)', color:'#fff', fontSize:11, fontWeight:700, cursor:'pointer', zIndex:2 } }, '☁️ Sair'),
+      ce('div', { style:{ maxWidth:700, margin:'0 auto' } },
+        ce('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', width:'100%' } },
+          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:24, width:'100%', textAlign:'center' } }, '🏖️ Pousada Belchior 🏖️'),
+          ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, paddingLeft:2, marginTop:3, width:'100%', textAlign:'center' } }, 'Balneário Magistério')),
+        ce('div', { style:{ display:'flex', gap:8, marginTop:14 } },
+          ...[[doMesEFuturos.length, '#fff', 'aluguéis ›', 'alugueis'], [pendentes, '#fbbf24', 'pendentes ›', 'pendentes'], [brl(aReceber), '#fff', 'a receber', null]].map(([val, cor, label, alvo]) =>
+            ce(alvo ? 'button' : 'div', { key:label, onClick: alvo ? () => abrirLista(alvo) : undefined, style:{ flex:1, background:'rgba(255,255,255,.10)', borderRadius:8, padding:'8px 6px', textAlign:'center', border: alvo ? '1px solid rgba(255,255,255,.35)' : 'none', cursor: alvo ? 'pointer' : 'default', fontFamily:'inherit' } },
+              ce('div', { style:{ color:cor, fontWeight:700, fontSize:15 } }, val),
+              ce('div', { style:{ color:'#94b8d8', fontSize:10, marginTop:1 } }, label))))
+      )
+    );
+  }
+
+  /* ── tab bar ── */
+  function renderTabBar() {
+    return ce('div', { style:{ display:'flex', background:'#fff', borderRadius:12, padding:4, boxShadow:'0 2px 8px rgba(0,0,0,.06)', marginBottom:16 } },
+      ...[['casas','🏠','Casas'], ['vagas','📅','Vagas']].map(([id, icon, label]) =>
+        ce('button', { key:id, onClick:() => { if (id === 'casas') irInicio(); else { setAberta(null); setLista(null); setAba(id); empilhar(); } }, style:{ flex:1, padding:'10px 4px', border:'none', borderRadius:9,
+          background: aba === id ? '#1a3a5c' : 'transparent', color: aba === id ? '#fff' : '#888',
+          fontSize:13, fontWeight:700, cursor:'pointer', transition:'all .2s' } }, icon + ' ' + label))
+    );
+  }
+
+  /* ── aba casas ── */
+  function renderCasas() {
+    const abrirCasa = (i, de, ate) => { setAberta({ idx:i, de:de || '', ate:ate || '' }); empilhar(); window.scrollTo(0, 0); };
+    const comum = i => ({ idx:i, regs:dados.filter(r => r.casa === i), onAdd:adicionar, onQuit:alternarQuit, onAbrir:abrirCasa, onVoltar:irInicio, onRecibo:abrirRecibo, onEdit:editar,
+      onDel:pedirExclusao });
+    if (aberta) return ce(CasaCard, { key:'d' + aberta.idx + aberta.de + (aberta.edit ? aberta.edit.id : ''), ...comum(aberta.idx), modo:'detalhe', pre:aberta });
+    return ce('div', { className:'casas-grid', style:{ display:'grid', gridTemplateColumns:'1fr', gap:14 } },
+      ...CASAS.map((c, i) => ce(CasaCard, { key:c.nome, ...comum(i), modo:'resumo' })));
+  }
+
+  /* ── tela de aluguéis (mês corrente e futuros) ou de pendentes ── */
+  function renderLista() {
+    const pend = lista === 'pendentes';
+    const itens = (pend ? dados.filter(r => !r.quit) : doMesEFuturos)
+      .slice().sort((a, b) => a.de < b.de ? -1 : a.de > b.de ? 1 : a.casa - b.casa);
+    const somaTotal = itens.reduce((a, r) => a + totalR(r), 0);
+    const somaResta = itens.reduce((a, r) => a + restaR(r), 0);
+    const linhas = [];
+    let mesAnt = '';
+    itens.forEach(r => {
+      const mk = r.de.slice(0, 7);
+      if (mk !== mesAnt) {
+        mesAnt = mk;
+        linhas.push(ce('div', { key:'m' + mk, style:{ fontWeight:700, fontSize:14, color:'#1a3a5c', margin:'14px 0 8px' } }, '📅 ' + MESES[+mk.slice(5) - 1] + ' ' + mk.slice(0, 4)));
+      }
+      const c = CASAS[r.casa];
+      linhas.push(ce('div', { key:r.id, style:{ background:'#fff', borderRadius:12, padding:'12px 14px', marginBottom:10, boxShadow:'0 2px 8px rgba(0,0,0,.06)', borderLeft:'5px solid ' + c.cor } },
+        ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 } },
+          ce('span', { style:{ fontSize:12, fontWeight:700, padding:'3px 12px', borderRadius:999, background:c.cor, color:'#fff' } }, c.nome),
+          ce('span', { style:{ fontWeight:700, fontSize:12, color: r.quit ? '#059669' : '#b45309' } }, r.quit ? '✅ Concluído' : '⏳ Pendente')),
+        ce('div', { style:{ fontWeight:700, fontSize:15, color:'#1a3a5c', margin:'8px 0 2px' } }, r.nome),
+        ce('div', { style:{ fontSize:12, color:'#666', marginBottom:6 } }, dataBR(r.de) + ' a ' + dataBR(r.ate) + ' · ' + dias(r.de, r.ate) + ' dias × ' + brl(r.diaria)),
+        ce('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#444' } },
+          ce('span', null, 'Total ' + brl(totalR(r))),
+          ce('span', null, 'Sinal ' + brl(r.sinal)),
+          ce('span', { style:{ fontWeight:700, color: r.quit ? '#059669' : '#dc2626' } }, 'Resta ' + brl(restaR(r)))),
+        ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 } },
+          ce('button', { onClick:() => alternarQuit(r.id), style:{ flex:'1 1 100%', padding:8, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, r.quit ? '↩️ Reabrir' : '💰 Marcar quitado'),
+          ce('button', { onClick:() => abrirEdicao(r), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, '✏️ Editar'),
+          ce('button', { onClick:() => abrirRecibo(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🧾 Recibo'),
+          ce('button', { onClick:() => pedirExclusao(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🗑️'))
+      ));
+    });
+    return ce('div', null,
+      ce('button', { onClick:irInicio, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar'),
+      ce('div', { style:{ fontWeight:700, fontSize:18, color:'#1a3a5c' } }, pend ? '⏳ Aluguéis pendentes' : '📋 Aluguéis do mês e futuros'),
+      ce('div', { style:{ fontSize:12, color:'#888', marginTop:2 } }, pend ? 'Todos os aluguéis ainda não quitados' : 'De ' + MESES[hoje.getMonth()] + ' ' + hoje.getFullYear() + ' em diante'),
+      ce('div', { style:{ display:'flex', gap:6, margin:'12px 0' } },
+        ...[[itens.length, '#1a3a5c', 'aluguéis'], [brl(somaTotal), '#1a3a5c', 'total'], [brl(somaResta), somaResta ? '#dc2626' : '#059669', 'a receber']].map(([v, cor, l]) =>
+          ce('div', { key:l, style:{ flex:1, background:'#fff', borderRadius:8, padding:'8px 4px', textAlign:'center', boxShadow:'0 1px 6px rgba(0,0,0,.05)' } },
+            ce('div', { style:{ fontWeight:700, fontSize:13, color:cor } }, v),
+            ce('div', { style:{ fontSize:10, color:'#888', marginTop:1 } }, l)))),
+      itens.length === 0
+        ? ce('div', { style:{ textAlign:'center', padding:'30px 0', color:'#bbb', fontSize:14 } }, pend ? '🎉 Nenhum aluguel pendente' : '📭 Nenhum aluguel neste mês ou nos próximos')
+        : linhas
+    );
+  }
+
+  /* ── recibo: tela própria, impressa/salva em PDF pelo botão do celular ── */
+  function renderRecibo() {
+    const r = dados.find(x => x.id === recibo.id);
+    const tipo = recibo.tipo;
+    const pill = { padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer' };
+    const v = r ? validos(r) : {};
+    const barra = ce('div', { className:'no-print', style:{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap' } },
+      ce('button', { onClick:fecharRecibo, style:pill }, '‹ Voltar'),
+      r && v[tipo] && ce('button', { onClick:() => window.print(), style:{ ...pill, background:'#1a3a5c', color:'#fff', border:'2px solid #1a3a5c' } }, '🖨️ Imprimir / PDF'),
+      ce('button', { onClick:() => setCfgAberto(a => !a), style:pill }, '⚙️ Dados do emitente'));
+    const envolve = (...filhos) => ce('div', { style:{ minHeight:'100vh', background:'#F8F5F0', padding:'14px 12px 32px' } },
+      ce('div', { style:{ maxWidth:660, margin:'0 auto' } }, barra, ...filhos));
+    const painel = cfgAberto && ce('div', { className:'no-print', style:{ background:'#fff', borderRadius:12, padding:14, marginBottom:12, boxShadow:'0 2px 8px rgba(0,0,0,.06)', display:'grid', gap:10 } },
+      ...[['nome','Nome / razão social'], ['doc','CPF / CNPJ'], ['end','Endereço'], ['cidade','Cidade (para o local e data)']].map(([k, l]) =>
+        ce('label', { key:k, style:{ display:'block' } },
+          ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, l),
+          ce('input', { style:inputStyle, value:cfg[k] || '', onChange:e => { const val = e.target.value; setCfg(p => ({ ...p, [k]:val })); } }))),
+      ce('div', { style:{ fontSize:11, color:'#999' } }, 'Ficam salvos neste aparelho.'));
+    if (!r) return envolve(ce('div', { style:{ textAlign:'center', color:'#999', padding:30 } }, 'Aluguel não encontrado.'));
+
+    const tot = totalR(r), sin = r.sinal, rest = Math.max(0, tot - sin);
+    const valor = tipo === 'sinal' ? sin : tipo === 'quit' ? rest : tot;
+    const saldo = tipo === 'sinal' ? rest : 0;
+    const rec = r.rec && r.rec[tipo];
+    const num = rec ? String(rec.n).padStart(3, '0') : fb ? '…' : String(proxNum(dados)).padStart(3, '0');
+    const dataEm = dataLonga(rec ? rec.d : isoHoje());
+    const descr = tipo === 'sinal' ? 'sinal de reserva' : tipo === 'quit' ? 'pagamento do saldo restante (quitação)' : 'pagamento integral, à vista,';
+    const opcoes = [['sinal','Sinal'], ['quit','Quitação'], ['total','À vista (total)']];
+    const seletor = ce('div', { className:'no-print', style:{ display:'flex', gap:6, marginBottom:12 } },
+      ...opcoes.map(([k, l]) => ce('button', { key:k, disabled:!v[k], onClick:() => setRecibo({ id:r.id, tipo:k }),
+        style:{ flex:1, padding:'9px 4px', borderRadius:10, border:'2px solid ' + (tipo === k ? '#1a3a5c' : '#e5e7eb'), background: tipo === k ? '#1a3a5c' : '#fff',
+          color: tipo === k ? '#fff' : '#1a3a5c', opacity: v[k] ? 1 : .35, fontSize:12, fontWeight:700, cursor: v[k] ? 'pointer' : 'not-allowed' } }, l)));
+    const dataPag = ce('label', { className:'no-print', style:{ display:'block', background:'#fff', borderRadius:12, padding:12, marginBottom:12, boxShadow:'0 2px 8px rgba(0,0,0,.06)' } },
+      ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, '📅 Data do pagamento (aparece no recibo)'),
+      ce('input', { type:'date', style:inputStyle, value: rec ? rec.d : isoHoje(),
+        onClick:e => { try { e.target.showPicker && e.target.showPicker(); } catch (_) {} },
+        onChange:e => {
+          const val = e.target.value;
+          if (!val || !rec) return;
+          setDados(prev => prev.map(x => x.id === r.id ? { ...x, rec:{ ...x.rec, [tipo]:{ ...x.rec[tipo], d:val } } } : x));
+        } }));
+    if (!v[tipo]) return envolve(painel, seletor, ce('div', { style:{ textAlign:'center', color:'#999', padding:30, fontSize:14 } }, 'Não há pagamento registrado para este tipo de recibo.'));
+
+    const linha = (k, val, forte) => ce('div', { key:k, style:{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontWeight: forte ? 700 : 400 } }, ce('span', null, k), ce('span', null, val));
+    const recibo_ = ce('div', { id:'recibo', style:{ background:'#fff', border:'1px solid #cfcfcf', borderRadius:6, padding:'26px 22px', margin:'0 auto', fontFamily:'Georgia,serif', color:'#111', boxShadow:'0 2px 12px rgba(0,0,0,.08)' } },
+      ce('div', { style:{ textAlign:'center', borderBottom:'2px solid #111', paddingBottom:10, marginBottom:14 } },
+        ce('div', { style:{ fontSize:20, fontWeight:700 } }, cfg.nome || 'Pousada Belchior'),
+        cfg.doc && ce('div', { style:{ fontSize:12 } }, 'CPF/CNPJ: ' + cfg.doc),
+        cfg.end && ce('div', { style:{ fontSize:12 } }, cfg.end)),
+      ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:12 } },
+        ce('div', { style:{ fontSize:24, fontWeight:700, letterSpacing:4 } }, 'RECIBO'),
+        ce('div', { style:{ fontSize:15, fontWeight:700 } }, 'Nº ' + num)),
+      ce('div', { style:{ border:'2px solid #111', padding:10, textAlign:'center', fontSize:20, fontWeight:700, marginBottom:14 } }, 'VALOR: ' + brl(valor)),
+      ce('p', { style:{ fontSize:15, lineHeight:1.7, textAlign:'justify', margin:'0 0 14px' } },
+        'Recebi de ', ce('b', null, r.nome), ' a importância de ', ce('b', null, brl(valor)), ' (' + extenso(valor) + '), referente ao ' + descr + ' da locação da ',
+        ce('b', null, CASAS[r.casa].nome), ', no período de ' + dataBR(r.de) + ' a ' + dataBR(r.ate) + ' (' + dias(r.de, r.ate) + (dias(r.de, r.ate) === 1 ? ' dia' : ' dias') + '), com diária de ' + brl(r.diaria) + '.'),
+      ce('div', { style:{ fontSize:13, borderTop:'1px solid #999', borderBottom:'1px solid #999', padding:'8px 0', marginBottom:20 } },
+        linha('Total da locação', brl(tot)),
+        sin > 0 && linha('Sinal de reserva', brl(sin)),
+        linha('Valor deste recibo', brl(valor), true),
+        linha('Saldo restante', brl(saldo), true)),
+      ce('div', { style:{ fontSize:14, marginBottom:34 } }, (cfg.cidade ? cfg.cidade + ', ' : '') + dataEm + '.'),
+      ce('div', { style:{ textAlign:'center' } },
+        ce('div', { style:{ borderTop:'1px solid #111', width:'70%', margin:'0 auto 4px' } }),
+        ce('div', { style:{ fontSize:13, fontWeight:700 } }, cfg.nome || 'Pousada Belchior'),
+        cfg.doc && ce('div', { style:{ fontSize:12 } }, cfg.doc)));
+    return envolve(painel, seletor, dataPag, recibo_);
+  }
+
+  /* ── aba vagas ── */
+  function renderVagas() {
+    const nDias = new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate();
+    const nav = d => { let m = mes + d, a = ano; if (m < 0) { m = 11; a--; } if (m > 11) { m = 0; a++; } setMes(m); setAno(a); };
+    const btn = { padding:'8px 16px', borderRadius:20, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:14, fontWeight:700, cursor:'pointer' };
+    return ce(React.Fragment, null,
+      ce('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14, flex:'none' } },
+        ce('button', { onClick:() => nav(-1), style:btn }, '‹'),
+        ce('div', { style:{ fontWeight:700, fontSize:17, color:'#1a3a5c' } }, MESES[mes] + ' ' + ano),
+        ce('button', { onClick:() => nav(1), style:btn }, '›')),
+      ce('div', { className:'scroll-area' },
+      ...CASAS.map((c, i) => {
+        const ocu = new Set();
+        dados.filter(r => r.casa === i).forEach(r => {
+          for (let t = D(r.de); t <= D(r.ate); t = new Date(+t + 864e5))
+            if (t.getUTCFullYear() === ano && t.getUTCMonth() === mes) ocu.add(t.getUTCDate());
+        });
+        const livres = []; for (let d = 1; d <= nDias; d++) if (!ocu.has(d)) livres.push(d);
+        const faixas = []; livres.forEach(d => { const l = faixas[faixas.length - 1]; if (l && l[1] === d - 1) l[1] = d; else faixas.push([d, d]); });
+        const txt = livres.length ? faixas.map(f => f[0] === f[1] ? p2(f[0]) : p2(f[0]) + ' a ' + p2(f[1])).join(' · ') : 'Sem vagas neste mês';
+        return ce('div', { key:c.nome, style:{ background:'#fff', borderRadius:14, padding:16, marginBottom:12, boxShadow:'0 2px 12px rgba(0,0,0,.06)', borderTop:'4px solid ' + c.cor } },
+          ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline' } },
+            ce('div', { style:{ fontWeight:700, fontSize:16, color:'#1a3a5c' } }, '🏠 ' + c.nome),
+            ce('div', { style:{ fontSize:13, fontWeight:700, color: livres.length ? '#059669' : '#dc2626' } }, livres.length + ' de ' + nDias + ' dias livres')),
+          ce('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(30px,1fr))', gap:4, margin:'12px 0' } },
+            ...Array.from({ length:nDias }, (_, k) => ce('div', { key:k, style:{ textAlign:'center', padding:'5px 0', borderRadius:6, fontSize:11, fontWeight:700,
+              background: ocu.has(k + 1) ? '#fee2e2' : '#ecfdf5', color: ocu.has(k + 1) ? '#dc2626' : '#059669' } }, k + 1))),
+          ce('div', { style:{ fontSize:12, color:'#666' } }, ce('b', null, 'Livre: '), txt),
+          ce('div', { style:{ fontSize:11, color:'#aaa', marginTop:4 } }, ocu.size + ' dia(s) ocupado(s)')
+        );
+      }),
+      ce('div', { style:{ fontSize:11, color:'#999', textAlign:'center' } }, '🟩 livre   🟥 ocupado · conta do 1º ao último dia (00:00 às 23:59)'))
+    );
+  }
+
+  /* ── acesso (nuvem) ── */
+  const telaCheia = (...filhos) => ce('div', { style:{ minHeight:'100vh', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
+    ce('div', { style:{ width:'100%', maxWidth:340, textAlign:'center', color:'#fff' } }, ...filhos));
+  if (sessao === 'carregando') return telaCheia(ce('div', { style:{ fontSize:15 } }, '🏖️ Carregando…'));
+  if (sessao === 'semsdk') return telaCheia(
+    ce('div', { style:{ fontSize:32, marginBottom:8 } }, '📡'),
+    ce('div', { style:{ fontSize:15, marginBottom:16 } }, 'Sem conexão com o servidor. Abra o app com internet.'),
+    ce('button', { onClick:() => location.reload(), style:{ padding:'11px 22px', borderRadius:10, border:'none', background:'#fff', color:'#1a3a5c', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Tentar de novo'));
+  if (sessao === 'login') return telaCheia(
+    ce('div', { style:{ fontSize:24, fontWeight:700 } }, '🏖️ Pousada Belchior 🏖️'),
+    ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, margin:'4px 0 24px' } }, 'Balneário Magistério'),
+    ce('input', { type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
+      onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
+      onKeyDown:e => { if (e.key === 'Enter') entrar(); },
+      style:{ width:'100%', padding:'13px 14px', borderRadius:10, fontSize:16, border:'none', outline:'none', textAlign:'center', marginBottom:10 } }),
+    loginErro && ce('div', { style:{ color:'#fecaca', fontSize:13, marginBottom:10 } }, '❌ ' + loginErro),
+    ce('button', { onClick:entrar, disabled:entrando, style:{ width:'100%', padding:13, borderRadius:10, border:'none', background:'#fbbf24', color:'#1a3a5c', fontSize:15, fontWeight:700, cursor:'pointer', opacity: entrando ? .6 : 1 } }, entrando ? 'Entrando…' : 'Entrar'));
+
+  /* ── root ── */
+  if (recibo) return renderRecibo();
+  const congelado = !lista && (aba === 'vagas' || !aberta);   /* início e Vagas: só os cards rolam */
+  return ce('div', { className: congelado ? 'app-frozen' : undefined, style: congelado ? { background:'#F8F5F0' } : { minHeight:'100vh', background:'#F8F5F0', paddingBottom:32 } },
+    toast && ce(Toast, { key:toast, msg:toast, onDone:() => setToast(null) }),
+    modalExcluir && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
+      ce('div', { style:{ background:'#fff', borderRadius:16, padding:28, width:'100%', maxWidth:320, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
+        ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:8 } }, '🔒'),
+        ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:6 } }, 'Confirmar exclusão'),
+        ce('div', { style:{ fontSize:13, color:'#666', textAlign:'center', marginBottom:20 } }, 'Digite a senha para apagar este lançamento.'),
+        ce('input', { type:'password', placeholder:'Senha', value:senhaInput, autoFocus:true,
+          onChange:e => { setSenhaInput(e.target.value); setSenhaErro(false); },
+          onKeyDown:e => { if (e.key === 'Enter') confirmarExclusao(); },
+          style:{ width:'100%', padding:'11px 14px', borderRadius:9, fontSize:15, border: senhaErro ? '2px solid #ef4444' : '2px solid #e5e7eb', outline:'none', marginBottom: senhaErro ? 6 : 16 } }),
+        senhaErro && ce('div', { style:{ color:'#ef4444', fontSize:12, marginBottom:12, textAlign:'center' } }, '❌ Senha incorreta'),
+        ce('div', { style:{ display:'flex', gap:10 } },
+          ce('button', { onClick:() => { setModalExcluir(null); setSenhaInput(''); setSenhaErro(false); },
+            style:{ flex:1, padding:11, borderRadius:9, border:'2px solid #e5e7eb', background:'#fff', color:'#555', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Cancelar'),
+          ce('button', { onClick:confirmarExclusao,
+            style:{ flex:1, padding:11, borderRadius:9, border:'none', background:'linear-gradient(135deg,#dc2626,#b91c1c)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Apagar')))),
+    renderHeader(),
+    congelado
+      ? ce('div', { className:'app-frozen-body' },
+          renderTabBar(),
+          aba === 'vagas' ? renderVagas() : ce('div', { className:'scroll-area' }, renderCasas()))
+      : ce('div', { style:{ maxWidth:700, margin:'14px auto 0', padding:'0 12px' } },
+          renderTabBar(),
+          lista ? renderLista() : aba === 'casas' ? renderCasas() : renderVagas())
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(ce(App, null));
+</script>
+</body>
+</html>

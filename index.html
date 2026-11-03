@@ -339,7 +339,6 @@ const EMIT_KEY = 'pousada_belchior_emitente';
 
 /* ─── senha verificada no aparelho (para abrir sem internet) ─────────────── */
 const HASH_KEY = 'pousada_belchior_hash';
-const TEMPO_BLOQUEIO = 30000;   /* ms em segundo plano antes de pedir a senha de novo */
 const hexDe = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 async function derivarLocal(senha, salt) {
   const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
@@ -366,8 +365,10 @@ function App() {
   const hoje = new Date();
   const [dados, setDados] = useState(loadDados);
   const [sessao, setSessao] = useState(NUVEM ? (fb ? 'carregando' : 'semsdk') : 'ok');   /* carregando | login | ok | semsdk */
-  const [liberado, setLiberado] = useState(!NUVEM);   /* a senha é pedida toda vez que o app abre */
+  const [liberado, setLiberado] = useState(!NUVEM);   /* a senha é pedida cada vez que o app é aberto */
   const [loginSenha, setLoginSenha] = useState('');
+  const loginRef = React.useRef(null);
+  const focarSenha = () => setTimeout(() => { if (loginRef.current) loginRef.current.focus(); }, 60);
   const [loginErro,  setLoginErro]  = useState('');
   const [entrando,   setEntrando]   = useState(false);
   const dadosRef   = React.useRef(dados); dadosRef.current = dados;
@@ -423,18 +424,6 @@ function App() {
 
   /* dados do emitente */
   useEffect(() => { try { localStorage.setItem(EMIT_KEY, JSON.stringify(cfg)); } catch (_) {} }, [cfg]);
-
-  /* ── bloqueio: pede a senha de novo se o app ficou em segundo plano ── */
-  useEffect(() => {
-    if (!NUVEM) return;
-    let saiu = 0;
-    const f = () => {
-      if (document.hidden) saiu = Date.now();
-      else { if (saiu && Date.now() - saiu > TEMPO_BLOQUEIO) { setLoginSenha(''); setLoginErro(''); setLiberado(false); } saiu = 0; }
-    };
-    document.addEventListener('visibilitychange', f);
-    return () => document.removeEventListener('visibilitychange', f);
-  }, []);
 
   /* ── nuvem: login ── */
   useEffect(() => {
@@ -558,7 +547,8 @@ function App() {
   };
   const confirmarExclusao = () => {
     const apagar = () => { setDados(prev => prev.filter(r => r.id !== modalExcluir)); setModalExcluir(null); setSenhaInput(''); setToast('🗑️ Lançamento removido.'); };
-    verificarSenha(senhaInput).then(ok => ok ? apagar() : setSenhaErro(true)).catch(() => setSenhaErro(true));
+    const erro = () => { setSenhaErro(true); setSenhaInput(''); };
+    verificarSenha(senhaInput).then(ok => ok ? apagar() : erro()).catch(erro);
   };
   const desbloquear = async () => {
     if (!loginSenha || entrando) return;
@@ -568,9 +558,10 @@ function App() {
       if (await verificarSenha(senha)) {
         setLiberado(true); setLoginSenha('');
         if (!fb.auth.currentUser) fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senha)).catch(() => {});
-      } else setLoginErro('Senha incorreta');
+      } else { setLoginErro('Senha incorreta'); setLoginSenha(''); focarSenha(); }
     } catch (e) {
-      setLoginErro(temHash() ? 'Senha incorreta' : 'Sem internet. Neste celular, a primeira entrada precisa de conexão.');
+      if (temHash()) { setLoginErro('Senha incorreta'); setLoginSenha(''); focarSenha(); }
+      else setLoginErro('Sem internet. Neste celular, a primeira entrada precisa de conexão.');
     }
     setEntrando(false);
   };
@@ -771,9 +762,10 @@ function App() {
     ce('div', { style:{ fontSize:15, marginBottom:16 } }, 'Não foi possível carregar o app. Abra uma vez com internet.'),
     ce('button', { onClick:() => location.reload(), style:{ padding:'11px 22px', borderRadius:10, border:'none', background:'#fff', color:'#1a3a5c', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Tentar de novo'));
   if (!liberado) return telaCheia(
-    ce('div', { style:{ fontSize:24, fontWeight:700 } }, '🏖️ Pousada Belchior 🏖️'),
-    ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, margin:'4px 0 24px' } }, 'Balneário Magistério'),
-    ce('input', { type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
+    ce('div', { style:{ fontSize:24, fontWeight:700 } }, '⛱️ Pousada Belchior ⛱️'),
+    ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, margin:'4px 0 18px' } }, 'Balneário Magistério'),
+    ce('div', { style:{ display:'inline-block', fontSize:12, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'#fbbf24', border:'1px solid #fbbf24', borderRadius:999, padding:'5px 16px', marginBottom:20 } }, '🔒 Área restrita'),
+    ce('input', { ref:loginRef, type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
       onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
       onKeyDown:e => { if (e.key === 'Enter') desbloquear(); },
       style:{ width:'100%', padding:'13px 14px', borderRadius:10, fontSize:16, border:'none', outline:'none', textAlign:'center', marginBottom:10 } }),

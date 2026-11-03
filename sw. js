@@ -1,6 +1,6 @@
-/* Service worker da Pousada Belchior: permite abrir o app sem internet.
+/* Service worker da Pousada Belchior: abre o app na hora e funciona sem internet.
    Publique este arquivo na mesma pasta do index.html. */
-const CACHE = 'pousada-belchior-v1';
+const CACHE = 'pousada-belchior-v3';
 const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
@@ -25,6 +25,11 @@ self.addEventListener('activate', e => {
   );
 });
 
+async function avisarNovaVersao() {
+  const cs = await self.clients.matchAll({ type:'window' });
+  cs.forEach(c => c.postMessage('nova-versao'));
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -40,10 +45,20 @@ self.addEventListener('fetch', e => {
     })));
     return;
   }
-  /* o app: rede primeiro (até 3 s), assim as atualizações chegam logo; sem internet usa o guardado */
-  e.respondWith(
-    Promise.race([fetch(req), new Promise((_, rej) => setTimeout(rej, 3000))])
-      .then(res => { if (res.ok) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(req, cp)); } return res; })
-      .catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
-  );
+
+  /* o app: abre na hora com a cópia guardada e busca a versão nova em segundo plano */
+  e.respondWith(caches.match(req).then(guardado => {
+    const rede = fetch(req).then(async res => {
+      if (res.ok) {
+        const cp = res.clone();
+        let diferente = false;
+        if (guardado) { try { diferente = (await guardado.clone().text()) !== (await res.clone().text()); } catch (_) {} }
+        const c = await caches.open(CACHE); await c.put(req, cp);
+        if (diferente) avisarNovaVersao();      /* só avisa depois de guardar a nova cópia */
+      }
+      return res;
+    }).catch(() => null);
+    e.waitUntil(rede);
+    return guardado || rede.then(r => r || caches.match('./index.html'));
+  }));
 });

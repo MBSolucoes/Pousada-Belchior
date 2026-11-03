@@ -762,9 +762,9 @@ function App() {
     ce('div', { style:{ fontSize:15, marginBottom:16 } }, 'Não foi possível carregar o app. Abra uma vez com internet.'),
     ce('button', { onClick:() => location.reload(), style:{ padding:'11px 22px', borderRadius:10, border:'none', background:'#fff', color:'#1a3a5c', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Tentar de novo'));
   if (!liberado) return telaCheia(
-    ce('div', { style:{ fontSize:24, fontWeight:700 } }, '⛱️ Pousada Belchior ⛱️'),
+    ce('div', { style:{ fontSize:'clamp(16px, 5.4vw, 24px)', fontWeight:700, whiteSpace:'nowrap' } }, '⛱️ Pousada Belchior ⛱️'),
     ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, margin:'4px 0 18px' } }, 'Balneário Magistério'),
-    ce('div', { style:{ display:'inline-block', fontSize:12, fontWeight:700, letterSpacing:3, textTransform:'uppercase', color:'#fbbf24', border:'1px solid #fbbf24', borderRadius:999, padding:'5px 16px', marginBottom:20 } }, '🔒 Área restrita'),
+    ce('div', { style:{ display:'inline-block', fontSize:'clamp(15px, 4.8vw, 19px)', fontWeight:800, letterSpacing:2, whiteSpace:'nowrap', textTransform:'uppercase', color:'#fbbf24', border:'2px solid #fbbf24', borderRadius:999, padding:'9px 22px', marginBottom:22 } }, '🔒 Área restrita'),
     ce('input', { ref:loginRef, type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
       onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
       onKeyDown:e => { if (e.key === 'Enter') desbloquear(); },

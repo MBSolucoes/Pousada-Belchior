@@ -156,6 +156,14 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const c = CASAS[idx];
   const [f, setF] = useState(pre && pre.edit ? formDe(pre.edit) : pre ? { ...FORM0, de: pre.de, ate: pre.ate } : FORM0);
   const [editId, setEditId] = useState(pre && pre.edit ? pre.edit.id : null);
+  const [conflito, setConflito] = useState(null);
+  const ateRef = React.useRef(null);
+  /* ao confirmar o "De", abre o calendário do "Até" (já no mês certo e sem aceitar data anterior) */
+  const onDe = e => {
+    const v = e.target.value;
+    setF(prev => ({ ...prev, de: v, ate: (!prev.ate || prev.ate < v) ? v : prev.ate }));
+    if (v) setTimeout(() => { const el = ateRef.current; if (el) { el.focus(); try { el.showPicker && el.showPicker(); } catch (_) {} } }, 200);
+  };
   const formRef = React.useRef(null);
   const hj = new Date();
   const [ym, setYm] = useState(hj.getFullYear() * 12 + hj.getMonth());
@@ -187,8 +195,8 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
     if (!f.de || !f.ate || n < 1)  return onAdd(null, 'A data final não pode ser anterior à inicial');
     if (!diaria)                   return onAdd(null, 'Informe o valor da diária');
     if (sinal > total)             return onAdd(null, 'O sinal não pode ser maior que o total');
-    const choque = regs.some(r => r.id !== editId && f.de <= r.ate && f.ate >= r.de);
-    if (choque && !confirm('Este período se sobrepõe a outro aluguel desta casa. Lançar mesmo assim?')) return;
+    const outro = regs.find(r => r.id !== editId && f.de <= r.ate && f.ate >= r.de);
+    if (outro) { setConflito(outro); return; }
     if (editId) { onEdit(editId, { nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal }); setEditId(null); setF(FORM0); return; }
     onAdd({ id: Date.now().toString(36), casa: idx, nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal, quit: sinal >= total });
     setF(FORM0);
@@ -241,14 +249,22 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   if (modo === 'resumo') return ce('div', { style:cardStyle }, titulo, vagas);
   const voltar = ce('button', { onClick:onVoltar, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar');
   return ce('div', { style:cardStyle }, voltar, titulo, vagas,
+    conflito && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
+      ce('div', { style:{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:340, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
+        ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:6 } }, '⚠️'),
+        ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:8 } }, 'Datas em conflito'),
+        ce('div', { style:{ fontSize:13, color:'#555', textAlign:'center', lineHeight:1.5, marginBottom:18 } },
+          'O período ' + dataBR(f.de) + ' a ' + dataBR(f.ate) + ' se sobrepõe ao aluguel de ' + conflito.nome + ' (' + dataBR(conflito.de) + ' a ' + dataBR(conflito.ate) + ') na ' + c.nome + '. Corrija as datas ou exclua um dos aluguéis.'),
+        ce('button', { onClick:() => setConflito(null), style:{ width:'100%', padding:12, borderRadius:10, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', marginBottom:8 } }, '✏️ Corrigir as datas'),
+        ce('button', { onClick:() => { const id = conflito.id; setConflito(null); onDel(id); }, style:{ width:'100%', padding:12, borderRadius:10, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:14, fontWeight:700, cursor:'pointer' } }, '🗑️ Excluir o aluguel de ' + conflito.nome))),
     editId && ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } },
       '✏️ Editando aluguel',
       ce('button', { onClick:() => { setEditId(null); setF(FORM0); }, style:{ padding:'6px 12px', borderRadius:8, border:'1px solid #93c5fd', background:'#fff', color:'#1e40af', fontSize:12, fontWeight:700, cursor:'pointer' } }, 'Cancelar')),
     /* formulário */
     ce('div', { ref:formRef, onKeyDown:onEnter, className:'form-grid', style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 } },
       ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'next' })),
-      ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:set('de') })),
-      ce(Campo, { label:'Até' }, ce('input', { style:inputStyle, type:'date', value:f.ate, onChange:set('ate') })),
+      ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:onDe })),
+      ce(Campo, { label:'Até' }, ce('input', { ref:ateRef, style:inputStyle, type:'date', value:f.ate, min:f.de || undefined, onChange:set('ate') })),
       ce(Campo, { label:'Valor da diária' },   ce('input', { style:inputStyle, placeholder:'Ex.: 300', ...money('dia') })),
       ce(Campo, { label:'Sinal da reserva' },  ce('input', { style:inputStyle, placeholder:'Ex.: 500', ...money('sin') }))
     ),
@@ -321,11 +337,36 @@ const isoHoje  = () => { const t = new Date(); return t.getFullYear() + '-' + p2
 const dataLonga = iso => { const [y, m, d] = iso.split('-'); return (+d) + ' de ' + MESES[+m - 1].toLowerCase() + ' de ' + y; };
 const EMIT_KEY = 'pousada_belchior_emitente';
 
+/* ─── senha verificada no aparelho (para abrir sem internet) ─────────────── */
+const HASH_KEY = 'pousada_belchior_hash';
+const TEMPO_BLOQUEIO = 30000;   /* ms em segundo plano antes de pedir a senha de novo */
+const hexDe = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+async function derivarLocal(senha, salt) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+  return hexDe(await crypto.subtle.deriveBits({ name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' }, k, 256));
+}
+async function salvarHash(senha) {
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    localStorage.setItem(HASH_KEY, JSON.stringify({ s: hexDe(salt), h: await derivarLocal(senha, salt) }));
+  } catch (_) {}
+}
+async function verificarLocal(senha) {
+  try {
+    const o = JSON.parse(localStorage.getItem(HASH_KEY) || 'null');
+    if (!o) return false;
+    const salt = new Uint8Array(o.s.match(/../g).map(x => parseInt(x, 16)));
+    return (await derivarLocal(senha, salt)) === o.h;
+  } catch (_) { return false; }
+}
+const temHash = () => { try { return !!localStorage.getItem(HASH_KEY); } catch (_) { return false; } };
+
 /* ─── componente principal ───────────────────────────────────────────── */
 function App() {
   const hoje = new Date();
   const [dados, setDados] = useState(loadDados);
   const [sessao, setSessao] = useState(NUVEM ? (fb ? 'carregando' : 'semsdk') : 'ok');   /* carregando | login | ok | semsdk */
+  const [liberado, setLiberado] = useState(!NUVEM);   /* a senha é pedida toda vez que o app abre */
   const [loginSenha, setLoginSenha] = useState('');
   const [loginErro,  setLoginErro]  = useState('');
   const [entrando,   setEntrando]   = useState(false);
@@ -383,10 +424,22 @@ function App() {
   /* dados do emitente */
   useEffect(() => { try { localStorage.setItem(EMIT_KEY, JSON.stringify(cfg)); } catch (_) {} }, [cfg]);
 
+  /* ── bloqueio: pede a senha de novo se o app ficou em segundo plano ── */
+  useEffect(() => {
+    if (!NUVEM) return;
+    let saiu = 0;
+    const f = () => {
+      if (document.hidden) saiu = Date.now();
+      else { if (saiu && Date.now() - saiu > TEMPO_BLOQUEIO) { setLoginSenha(''); setLoginErro(''); setLiberado(false); } saiu = 0; }
+    };
+    document.addEventListener('visibilitychange', f);
+    return () => document.removeEventListener('visibilitychange', f);
+  }, []);
+
   /* ── nuvem: login ── */
   useEffect(() => {
     if (!fb) return;
-    return fb.auth.onAuthStateChanged(u => { setSessao(u ? 'ok' : 'login'); if (!u) { syncRef.current = null; cfgPronto.current = false; } });
+    return fb.auth.onAuthStateChanged(u => { setSessao(u ? 'ok' : 'deslogado'); if (!u) { syncRef.current = null; cfgPronto.current = false; } });
   }, []);
 
   /* ── nuvem: recebe os aluguéis (tempo real) ── */
@@ -497,24 +550,34 @@ function App() {
     if (!fb) { if (confirm('Excluir este lançamento?')) { setDados(prev => prev.filter(r => r.id !== id)); setToast('🗑️ Lançamento removido.'); } return; }
     setModalExcluir(id); setSenhaInput(''); setSenhaErro(false);
   };
+  /* confere a senha: primeiro no aparelho (funciona sem internet), depois no servidor */
+  const verificarSenha = async senha => {
+    if (await verificarLocal(senha)) return true;
+    try { await fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senha)); await salvarHash(senha); return true; }
+    catch (e) { if (/network/.test(e.code || '')) throw e; return false; }
+  };
   const confirmarExclusao = () => {
     const apagar = () => { setDados(prev => prev.filter(r => r.id !== modalExcluir)); setModalExcluir(null); setSenhaInput(''); setToast('🗑️ Lançamento removido.'); };
-    fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senhaInput)).then(apagar).catch(() => setSenhaErro(true));
+    verificarSenha(senhaInput).then(ok => ok ? apagar() : setSenhaErro(true)).catch(() => setSenhaErro(true));
   };
-  const entrar = () => {
+  const desbloquear = async () => {
     if (!loginSenha || entrando) return;
+    const senha = loginSenha;
     setEntrando(true); setLoginErro('');
-    fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(loginSenha))
-      .then(() => setLoginSenha(''))
-      .catch(e => setLoginErro(/network/.test(e.code || '') ? 'Sem conexão com a internet' : 'Senha incorreta'))
-      .finally(() => setEntrando(false));
+    try {
+      if (await verificarSenha(senha)) {
+        setLiberado(true); setLoginSenha('');
+        if (!fb.auth.currentUser) fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senha)).catch(() => {});
+      } else setLoginErro('Senha incorreta');
+    } catch (e) {
+      setLoginErro(temHash() ? 'Senha incorreta' : 'Sem internet. Neste celular, a primeira entrada precisa de conexão.');
+    }
+    setEntrando(false);
   };
-  const sair = () => { fb.auth.signOut(); };
 
   /* ── header ── */
   function renderHeader() {
     return ce('div', { style:{ position:'relative', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', padding:'20px 16px 16px', boxShadow:'0 4px 20px rgba(0,0,0,.3)' } },
-      fb && ce('button', { onClick:sair, style:{ position:'absolute', top:8, right:8, padding:'5px 10px', borderRadius:999, border:'1px solid rgba(255,255,255,.35)', background:'rgba(0,0,0,.25)', color:'#fff', fontSize:11, fontWeight:700, cursor:'pointer', zIndex:2 } }, '☁️ Sair'),
       ce('div', { style:{ maxWidth:700, margin:'0 auto' } },
         ce('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', width:'100%' } },
           ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:24, width:'100%', textAlign:'center' } }, '🏖️ Pousada Belchior 🏖️'),
@@ -700,23 +763,22 @@ function App() {
     );
   }
 
-  /* ── acesso (nuvem) ── */
+  /* ── acesso: a senha é pedida toda vez que o app abre ── */
   const telaCheia = (...filhos) => ce('div', { style:{ minHeight:'100vh', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
     ce('div', { style:{ width:'100%', maxWidth:340, textAlign:'center', color:'#fff' } }, ...filhos));
-  if (sessao === 'carregando') return telaCheia(ce('div', { style:{ fontSize:15 } }, '🏖️ Carregando…'));
   if (sessao === 'semsdk') return telaCheia(
     ce('div', { style:{ fontSize:32, marginBottom:8 } }, '📡'),
-    ce('div', { style:{ fontSize:15, marginBottom:16 } }, 'Sem conexão com o servidor. Abra o app com internet.'),
+    ce('div', { style:{ fontSize:15, marginBottom:16 } }, 'Não foi possível carregar o app. Abra uma vez com internet.'),
     ce('button', { onClick:() => location.reload(), style:{ padding:'11px 22px', borderRadius:10, border:'none', background:'#fff', color:'#1a3a5c', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Tentar de novo'));
-  if (sessao === 'login') return telaCheia(
+  if (!liberado) return telaCheia(
     ce('div', { style:{ fontSize:24, fontWeight:700 } }, '🏖️ Pousada Belchior 🏖️'),
     ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, margin:'4px 0 24px' } }, 'Balneário Magistério'),
     ce('input', { type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
       onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
-      onKeyDown:e => { if (e.key === 'Enter') entrar(); },
+      onKeyDown:e => { if (e.key === 'Enter') desbloquear(); },
       style:{ width:'100%', padding:'13px 14px', borderRadius:10, fontSize:16, border:'none', outline:'none', textAlign:'center', marginBottom:10 } }),
     loginErro && ce('div', { style:{ color:'#fecaca', fontSize:13, marginBottom:10 } }, '❌ ' + loginErro),
-    ce('button', { onClick:entrar, disabled:entrando, style:{ width:'100%', padding:13, borderRadius:10, border:'none', background:'#fbbf24', color:'#1a3a5c', fontSize:15, fontWeight:700, cursor:'pointer', opacity: entrando ? .6 : 1 } }, entrando ? 'Entrando…' : 'Entrar'));
+    ce('button', { onClick:desbloquear, disabled:entrando, style:{ width:'100%', padding:13, borderRadius:10, border:'none', background:'#fbbf24', color:'#1a3a5c', fontSize:15, fontWeight:700, cursor:'pointer', opacity: entrando ? .6 : 1 } }, entrando ? 'Entrando…' : 'Entrar'));
 
   /* ── root ── */
   if (recibo) return renderRecibo();
@@ -750,6 +812,11 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(ce(App, null));
+
+/* abrir sem internet: o sw.js guarda o app e as bibliotecas no aparelho (só funciona pelo link https) */
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 </script>
 </body>
 </html>

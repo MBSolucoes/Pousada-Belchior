@@ -1,0 +1,49 @@
+/* Service worker da Pousada Belchior: permite abrir o app sem internet.
+   Publique este arquivo na mesma pasta do index.html. */
+const CACHE = 'pousada-belchior-v1';
+const LIBS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
+  'https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js'
+];
+
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => Promise.all(['./', './index.html', ...LIBS].map(u => c.add(u).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  const mesmaOrigem = url.origin === self.location.origin;
+  const ehLib = LIBS.includes(req.url);
+  if (!mesmaOrigem && !ehLib) return;            /* Firestore e login passam direto */
+
+  if (ehLib) {                                    /* bibliotecas: cache primeiro */
+    e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => {
+      if (res.ok) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(req, cp)); }
+      return res;
+    })));
+    return;
+  }
+  /* o app: rede primeiro (até 3 s), assim as atualizações chegam logo; sem internet usa o guardado */
+  e.respondWith(
+    Promise.race([fetch(req), new Promise((_, rej) => setTimeout(rej, 3000))])
+      .then(res => { if (res.ok) { const cp = res.clone(); caches.open(CACHE).then(c => c.put(req, cp)); } return res; })
+      .catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
+  );
+});

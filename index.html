@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Pousada Belchior" />
-  <title>🏖️ Pousada Belchior</title>
+  <title>Pousada Belchior</title>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -612,7 +612,7 @@ function App() {
     return ce('div', { style:{ position:'relative', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', padding:'20px 16px 16px', boxShadow:'0 4px 20px rgba(0,0,0,.3)' } },
       ce('div', { style:{ maxWidth:700, margin:'0 auto' } },
         ce('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', width:'100%' } },
-          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:24, width:'100%', textAlign:'center' } }, '🏖️ Pousada Belchior 🏖️'),
+          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:26, width:'100%', textAlign:'center' } }, 'Pousada Belchior'),
           ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, paddingLeft:2, marginTop:3, width:'100%', textAlign:'center' } }, 'Balneário Magistério')),
         ce('div', { style:{ display:'flex', gap:8, marginTop:14 } },
           ...[[doMesEFuturos.length, '#fff', 'aluguéis ›', 'alugueis'], [pendentes, '#fbbf24', 'pendentes ›', 'pendentes'], [brl(aReceber), '#fff', 'a receber', null]].map(([val, cor, label, alvo]) =>

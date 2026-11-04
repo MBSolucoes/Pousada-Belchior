@@ -807,8 +807,8 @@ function App() {
   if (!liberado) return telaCheia(
     ce('div', { style:{ fontSize:'calc((min(100vw, 520px) - 32px) / 10.6)', fontWeight:700, whiteSpace:'nowrap', lineHeight:1.1, textShadow:'0 2px 12px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Pousada Belchior'),
     ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:15, letterSpacing:2, margin:'8px 0 20px', textShadow:'0 2px 10px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Balneário Magistério'),
-    ce('div', { style:{ maxWidth:340, margin:'0 auto', border:'2px solid #fbbf24', borderRadius:36, padding:'16px 18px 18px', background:'rgba(8,30,50,.55)', backdropFilter:'blur(6px)', WebkitBackdropFilter:'blur(6px)' } },
-      ce('div', { style:{ fontSize:'clamp(15px, 4.8vw, 19px)', fontWeight:800, letterSpacing:2, whiteSpace:'nowrap', textTransform:'uppercase', color:'#fbbf24', marginBottom:14 } }, '🔒 Área restrita'),
+    ce('div', { style:{ maxWidth:340, margin:'0 auto', border:'2px solid #fbbf24', borderRadius:36, padding:'16px 18px 18px', background:'rgba(8,30,50,.30)', backdropFilter:'blur(2px)', WebkitBackdropFilter:'blur(2px)' } },
+      ce('div', { style:{ fontSize:'clamp(15px, 4.8vw, 19px)', fontWeight:800, letterSpacing:2, whiteSpace:'nowrap', textTransform:'uppercase', color:'#fbbf24', marginBottom:14, textShadow:'0 2px 8px rgba(0,0,0,.85), 0 0 3px rgba(0,0,0,.7)' } }, '🔒 Área restrita'),
       ce('input', { ref:loginRef, type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
         onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
         onKeyDown:e => { if (e.key === 'Enter') desbloquear(); },

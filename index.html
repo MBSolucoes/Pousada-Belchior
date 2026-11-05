@@ -818,7 +818,7 @@ function App() {
 
   /* ── root ── */
   if (recibo) return renderRecibo();
-  const congelado = !!lista || aba === 'vagas' || !aberta;   /* início, Vagas, Aluguéis e Pendentes: só os cards rolam */
+  const congelado = true;   /* em todas as telas: cabeçalho e abas fixos, só o conteúdo rola */
   return ce('div', { className: congelado ? 'app-frozen' : undefined, style: congelado ? { background:'#F8F5F0' } : { minHeight:'100vh', background:'#F8F5F0', paddingBottom:32 } },
     toast && ce(Toast, { key:toast, msg:toast, onDone:() => setToast(null) }),
     modalExcluir && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
@@ -840,7 +840,7 @@ function App() {
     congelado
       ? ce('div', { className:'app-frozen-body' },
           renderTabBar(),
-          lista ? renderLista() : aba === 'vagas' ? renderVagas() : ce('div', { className:'scroll-area' }, renderCasas()))
+          lista ? renderLista() : aba === 'vagas' ? renderVagas() : ce('div', { key: aberta ? 'det' + aberta.idx : 'casas', className:'scroll-area' }, renderCasas()))
       : ce('div', { style:{ maxWidth:700, margin:'14px auto 0', padding:'0 12px' } },
           renderTabBar(),
           lista ? renderLista() : aba === 'casas' ? renderCasas() : renderVagas())

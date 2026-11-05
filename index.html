@@ -189,16 +189,18 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const [editId, setEditId] = useState(pre && pre.edit ? pre.edit.id : null);
   const [formAberto, setFormAberto] = useState(!!(pre && (pre.edit || pre.de)));   /* o formulário só aparece em tela própria */
   const [conflito, setConflito] = useState(null);
-  const ateRef = React.useRef(null);
+  const diaRef = React.useRef(null);
+  const [cal, setCal] = useState(null);   /* calendário próprio: { modo, ini, cm, msg } */
+  const calRef = React.useRef(null); calRef.current = cal;
   const formRef = React.useRef(null);
   const topoRef = React.useRef(null);
-  const fechar = () => { setFormAberto(false); setEditId(null); setF(FORM0); };
+  const fechar = () => { setFormAberto(false); setEditId(null); setF(FORM0); setCal(null); };
   const abrirForm = () => { setEditId(null); setF(FORM0); setFormAberto(true); };
 
   /* botão voltar do celular com o formulário aberto: fecha só o formulário */
   useEffect(() => {
     window.__pbForm = formAberto;
-    const ev = () => fechar();
+    const ev = () => { if (calRef.current) setCal(null); else fechar(); };   /* voltar do celular: fecha o calendário primeiro */
     window.addEventListener('pb-fechar-form', ev);
     return () => { window.__pbForm = false; window.removeEventListener('pb-fechar-form', ev); };
   }, [formAberto]);
@@ -207,19 +209,6 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   /* se o aluguel em edição foi excluído, fecha o formulário */
   useEffect(() => { if (editId && !regs.some(r => r.id === editId)) fechar(); }, [regs, editId]);
 
-  /* ao confirmar o "De", abre o calendário do "Até" (já no mês certo e sem aceitar data anterior) */
-  const onDe = e => {
-    const v = e.target.value;
-    setF(prev => ({ ...prev, de: v, ate: (!prev.ate || prev.ate < v) ? v : prev.ate }));
-    if (v) setTimeout(() => { const el = ateRef.current; if (el) { el.focus(); try { el.showPicker && el.showPicker(); } catch (_) {} } }, 200);
-  };
-  /* ao confirmar o "Até" (OK do calendário), o cursor vai para a Diária e o teclado abre */
-  const diaRef = React.useRef(null);
-  const onAte = e => {
-    const v = e.target.value;
-    setF(prev => ({ ...prev, ate: v }));
-    if (v) setTimeout(() => { const el = diaRef.current; if (el) el.focus(); }, 200);
-  };
   const hj = new Date();
   const [ym, setYm] = useState(hj.getFullYear() * 12 + hj.getMonth());
   useEffect(() => {
@@ -234,7 +223,7 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const navBtn = { width:34, height:30, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:16, fontWeight:700, cursor:'pointer' };
   const set  = k => e => setF(prev => ({ ...prev, [k]: e.target.value }));
   const money = k => ({
-    value: f[k], inputMode:'decimal', enterKeyHint: k === 'sin' ? 'done' : 'enter',   /* 'next' faria o Android pular direto para o próximo campo de texto, ignorando as datas */
+    value: f[k], inputMode:'decimal', enterKeyHint: 'done',
     onChange: set(k),
     onFocus: () => { const n = parseValor(f[k]); if (f[k]) setF(p => ({ ...p, [k]: n ? String(n).replace('.', ',') : '' })); },
     onBlur:  () => { if (f[k]) setF(p => ({ ...p, [k]: brl(parseValor(f[k])) })); },
@@ -259,30 +248,71 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
     fechar();
   };
 
-  /* Enter do celular: avança para o próximo campo; no último, confirma o lançamento */
-  const abrirCampo = el => { el.focus(); if (el.type === 'date') { try { el.showPicker && el.showPicker(); } catch (_) {} } };
-  const camposForm = () => Array.from(formRef.current.querySelectorAll('input:not([readonly])'));
-  const ultimoRef = React.useRef(null), toqueRef = React.useRef(0), enterRef = React.useRef(0);
-  const marcarToque = () => { toqueRef.current = Date.now(); };
+  /* Enter do celular: Nome → Celular → calendário → Diária (o Sinal só é tocado se houver) */
+  const enterRef = React.useRef(0);
   const onEnter = e => {
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
     e.preventDefault();
     if (e.repeat || Date.now() - enterRef.current < 350) return;   /* um toque no Enter = um passo só */
     enterRef.current = Date.now();
-    const els = camposForm();
-    const i = els.indexOf(e.target);
-    if (i < els.length - 1) abrirCampo(els[i + 1]);
-    else { e.target.blur(); lancar(); }
+    const k = e.target.dataset.k;
+    if (k === 'nome') { const el = formRef.current.querySelector('[data-k="cel"]'); if (el) el.focus(); }
+    else if (k === 'cel') { e.target.blur(); abrirCal('de'); }
+    else if (k === 'dia') e.target.blur();                       /* fecha o teclado; pagamento à vista não precisa de sinal */
+    else if (k === 'sin') { e.target.blur(); lancar(); }
   };
-  /* trava de segurança: se o teclado do Android pular campos sozinho (sem toque na tela), volta para o campo seguinte da sequência */
-  const onFocoForm = e => {
-    const el = e.target;
-    if (el.tagName !== 'INPUT' || el.readOnly) return;
-    const els = camposForm();
-    const i = els.indexOf(ultimoRef.current), j = els.indexOf(el);
-    if (i >= 0 && j > i + 1 && Date.now() - toqueRef.current > 700) { ultimoRef.current = els[i + 1]; abrirCampo(els[i + 1]); return; }
-    ultimoRef.current = el;
+
+  /* ── calendário próprio: escolhe o dia inicial e o final na mesma tela ── */
+  const regsLivres = regs.filter(r => r.id !== editId);
+  const abrirCal = modo => {
+    const ref = modo === 'ate' ? (f.ate || f.de) : f.de;
+    const [y, m] = /^\d{4}-\d{2}-\d{2}$/.test(ref || '') ? ref.split('-').map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1];
+    setCal({ modo, ini: modo === 'ate' && f.de ? f.de : null, cm: y * 12 + (m - 1), msg: '' });
   };
+  const diaCal = dia => {
+    if (!cal.ini || dia < cal.ini) { setCal(prev => ({ ...prev, ini: dia, msg: '' })); return; }      /* 1º toque (ou recomeço): dia inicial */
+    const outro = regsLivres.find(r => cal.ini <= r.ate && dia >= r.de);
+    if (outro) { setCal(prev => ({ ...prev, msg: 'Esse período passa por dias ocupados.' })); return; }
+    setF(prev => ({ ...prev, de: cal.ini, ate: dia }));                                              /* 2º toque: dia final, fecha e vai para a Diária */
+    setCal(null);
+    if (diaRef.current) diaRef.current.focus();
+  };
+  const rotEsq = { fontSize:11, color:'#888', fontWeight:700, marginBottom:3 };
+  const botaoData = (v, fn) => ce('button', { type:'button', onClick:fn, style:{ ...inputStyle, textAlign:'left', cursor:'pointer', color: v ? '#222' : '#9ca3af' } }, v ? dataBR(v) : 'Escolher data');
+  const calendario = cal && (() => {
+    const y = Math.floor(cal.cm / 12), m = cal.cm % 12;
+    const { nDias, ocu } = vagasMes(regsLivres, y, m);
+    const off = new Date(Date.UTC(y, m, 1)).getUTCDay();
+    const lim = cal.ini ? ([...regsLivres.map(r => r.de).filter(d => d > cal.ini)].sort()[0] || '9999-12-31') : null;   /* primeiro dia ocupado depois do início */
+    const celulas = [];
+    for (let k = 0; k < off; k++) celulas.push(ce('div', { key:'v' + k }));
+    for (let d = 1; d <= nDias; d++) {
+      const dia = y + '-' + p2(m + 1) + '-' + p2(d);
+      const ocupado = ocu.has(d), alem = !ocupado && lim && dia > lim, sel = dia === cal.ini;
+      const noPer = !cal.ini && f.de && f.ate && dia >= f.de && dia <= f.ate;
+      let st = { background:'#ecfdf5', color:'#059669' };
+      if (ocupado)      st = { background:'#fee2e2', color:'#dc2626' };
+      else if (alem)    st = { background:'#f3f4f6', color:'#c4c4c4' };
+      else if (sel)     st = { background:c.cor, color:'#fff' };
+      else if (noPer)   st = { background:c.bg, color:'#1a3a5c', boxShadow:'inset 0 0 0 2px ' + c.cor };
+      celulas.push(ce('button', { key:d, type:'button', disabled: ocupado || alem, onClick:() => diaCal(dia),
+        style:{ height:38, borderRadius:8, border:'none', fontSize:13, fontWeight:700, cursor: (ocupado || alem) ? 'default' : 'pointer', ...st } }, d));
+    }
+    return ce('div', { onClick:e => { if (e.target === e.currentTarget) setCal(null); }, style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16 } },
+      ce('div', { style:{ background:'#fff', borderRadius:16, padding:16, width:'100%', maxWidth:360, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
+        ce('div', { style:{ textAlign:'center', fontWeight:700, fontSize:15, color:'#1a3a5c' } }, '🏠 ' + c.nome + ' · Período do aluguel'),
+        ce('div', { style:{ textAlign:'center', fontWeight:700, fontSize:13, color:c.cor, margin:'4px 0 10px' } }, !cal.ini ? 'Toque no dia INICIAL' : 'Agora toque no dia FINAL (o mesmo dia = 1 dia)'),
+        ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 } },
+          ce('button', { type:'button', onClick:() => setCal(p => ({ ...p, cm: p.cm - 1 })), style:navBtn }, '‹'),
+          ce('div', { style:{ fontWeight:700, fontSize:14, color:'#1a3a5c' } }, MESES[m].toUpperCase() + ' ' + y),
+          ce('button', { type:'button', onClick:() => setCal(p => ({ ...p, cm: p.cm + 1 })), style:navBtn }, '›')),
+        ce('div', { style:{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:4 } },
+          ...['D','S','T','Q','Q','S','S'].map((x, i) => ce('div', { key:i, style:{ textAlign:'center', fontSize:11, fontWeight:700, color:'#888' } }, x))),
+        ce('div', { style:{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4 } }, ...celulas),
+        cal.msg && ce('div', { style:{ color:'#dc2626', fontSize:12, fontWeight:700, textAlign:'center', marginTop:8 } }, '⚠️ ' + cal.msg),
+        ce('div', { style:{ fontSize:11, color:'#999', textAlign:'center', margin:'10px 0' } }, '🟩 livre   🟥 ocupado'),
+        ce('button', { type:'button', onClick:() => setCal(null), style:{ width:'100%', padding:11, borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#555', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Cancelar')));
+  })();
 
   const ordenados = [...regs].sort((a, b) => a.de < b.de ? -1 : a.de > b.de ? 1 : 0);
   const comecarEdicao = r => { setEditId(r.id); setF(formDe(r)); setFormAberto(true); };
@@ -328,21 +358,22 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const pilula  = (cor, v) => ce('div', { style:{ height:40, display:'flex', alignItems:'center', justifyContent:'center', background:c.bg, borderRadius:9, fontWeight:700, fontSize:13, color:cor, whiteSpace:'nowrap' } }, v);
   const bloco   = (l, el) => ce('div', { key:l }, ce('div', { style:rotPil }, l), el);
   const formulario = ce(React.Fragment, null,
+    calendario,
     editId && ce('div', { style:{ background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } }, '✏️ Editando aluguel'),
-    ce('div', { ref:formRef, onKeyDown:onEnter, onFocus:onFocoForm, onPointerDown:marcarToque, onTouchStart:marcarToque, style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 } },
-      ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'enter' })),
+    ce('div', { ref:formRef, onKeyDown:onEnter, style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 } },
+      ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), 'data-k':'nome', autoComplete:'off', enterKeyHint:'enter' })),
       ce(Campo, { label:'Celular', full:true }, ce('input', { style:inputStyle, type:'text', inputMode:'numeric', placeholder:'(51) 00000-0000', value:f.cel, onChange:e => setF(prev => ({ ...prev, cel: formatCel(e.target.value) })),
         onFocus:() => setF(prev => prev.cel ? prev : { ...prev, cel:'(51) ' }),   /* DDD 51 já vem preenchido */
         onBlur:() => setF(prev => prev.cel.replace(/\D/g, '').length <= 2 ? { ...prev, cel:'' } : prev),   /* só o DDD = campo vazio */
-        autoComplete:'off', enterKeyHint:'enter' })),
-      ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:onDe })),
-      ce(Campo, { label:'Até' }, ce('input', { ref:ateRef, style:inputStyle, type:'date', value:f.ate, min:f.de || undefined, onChange:onAte })),
+        'data-k':'cel', autoComplete:'off', enterKeyHint:'enter' })),
+      ce('div', { key:'de' },  ce('div', { style:rotEsq }, 'De'),  botaoData(f.de,  () => abrirCal('de'))),
+      ce('div', { key:'ate' }, ce('div', { style:rotEsq }, 'Até'), botaoData(f.ate, () => abrirCal('ate'))),
       ce('div', { style:{ gridColumn:'1 / -1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } },
         bloco('Período', pilula('#1a3a5c', n + (n === 1 ? ' dia' : ' dias'))),
-        ce(Campo, { label:'Diária', centro:true }, ce('input', { ref:diaRef, style:inputPeq, placeholder:'Ex. 300', ...money('dia') })),
+        ce(Campo, { label:'Diária', centro:true }, ce('input', { ref:diaRef, 'data-k':'dia', style:inputPeq, placeholder:'Ex. 300', ...money('dia') })),
         bloco('TOTAL', pilula('#1a3a5c', brl(total)))),
       ce('div', { style:{ gridColumn:'1 / -1', display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } },
-        ce(Campo, { label:'Sinal', centro:true }, ce('input', { style:inputPeq, placeholder:'Ex. 500', ...money('sin') })),
+        ce(Campo, { label:'Sinal', centro:true }, ce('input', { 'data-k':'sin', style:inputPeq, placeholder:'Ex. 500', ...money('sin') })),
         bloco('SALDO', pilula(resta ? '#dc2626' : '#059669', brl(resta))))
     ),
     ce('div', { style:{ display:'flex', gap:10 } },

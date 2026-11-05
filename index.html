@@ -31,7 +31,7 @@
       to{opacity:1;transform:translateX(-50%) translateY(0)}
     }
     .app-frozen{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
-    .app-frozen-body{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;max-width:700px;margin:0 auto;padding:14px 12px 0}
+    .app-frozen-body{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;max-width:700px;margin:0 auto;padding:4px 12px 0}
     .scroll-area{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px}
     @page{margin:14mm}
     @media print{
@@ -625,7 +625,7 @@ function App() {
 
   /* ── tab bar ── */
   function renderTabBar() {
-    return ce('div', { style:{ display:'flex', background:'#fff', borderRadius:12, padding:4, boxShadow:'0 2px 8px rgba(0,0,0,.06)', marginBottom:16 } },
+    return ce('div', { style:{ display:'flex', background:'#fff', borderRadius:12, padding:4, boxShadow:'0 2px 8px rgba(0,0,0,.06)', marginBottom:10, flex:'none' } },
       ...[['casas','🏠','Casas'], ['vagas','📅','Vagas']].map(([id, icon, label]) =>
         ce('button', { key:id, onClick:() => { if (id === 'casas') irInicio(); else { setAberta(null); setLista(null); setAba(id); empilhar(); } }, style:{ flex:1, padding:'10px 4px', border:'none', borderRadius:9,
           background: aba === id ? '#1a3a5c' : 'transparent', color: aba === id ? '#fff' : '#888',

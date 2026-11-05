@@ -116,7 +116,7 @@ function parseValor(s) {
 const D       = s => new Date(s + 'T00:00:00Z');
 const dias    = (a, b) => (a && b) ? Math.round((D(b) - D(a)) / 864e5) + 1 : 0; /* 1º dia 00:00 até último dia 23:59 */
 const dataBR  = s => s.split('-').reverse().join('/');
-const totalR  = r => Math.round(dias(r.de, r.ate) * r.diaria * 100) / 100;
+const totalR  = r => r.pago > 0 ? r.pago : Math.round(dias(r.de, r.ate) * r.diaria * 100) / 100;   /* aluguel pago direto: o total é o valor pago */
 const restaR  = r => r.quit ? 0 : Math.max(0, totalR(r) - r.sinal);
 const p2      = n => String(n).padStart(2, '0');
 
@@ -163,21 +163,38 @@ function vagasMes(regs, ano, mes) {
   }
   return { nDias, ocu, faixas, livres: nDias - ocu.size };
 }
-const FORM0 = { nome:'', de:'', ate:'', dia:'', sin:'' };
-const formDe = r => ({ nome:r.nome, de:r.de, ate:r.ate, dia:brl(r.diaria), sin: r.sinal ? brl(r.sinal) : '' });
+const FORM0 = { nome:'', de:'', ate:'', dia:'', sin:'', pago:'' };
+const formDe = r => ({ nome:r.nome, de:r.de, ate:r.ate, dia:brl(r.diaria), sin: r.sinal ? brl(r.sinal) : '', pago: r.pago > 0 ? brl(r.pago) : '' });
 function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir, onVoltar, onRecibo }) {
   const c = CASAS[idx];
   const [f, setF] = useState(pre && pre.edit ? formDe(pre.edit) : pre ? { ...FORM0, de: pre.de, ate: pre.ate } : FORM0);
   const [editId, setEditId] = useState(pre && pre.edit ? pre.edit.id : null);
+  const [formAberto, setFormAberto] = useState(!!(pre && (pre.edit || pre.de)));   /* o formulário só aparece em tela própria */
   const [conflito, setConflito] = useState(null);
   const ateRef = React.useRef(null);
+  const formRef = React.useRef(null);
+  const topoRef = React.useRef(null);
+  const fechar = () => { setFormAberto(false); setEditId(null); setF(FORM0); };
+  const abrirForm = () => { setEditId(null); setF(FORM0); setFormAberto(true); };
+
+  /* botão voltar do celular com o formulário aberto: fecha só o formulário */
+  useEffect(() => {
+    window.__pbForm = formAberto;
+    const ev = () => fechar();
+    window.addEventListener('pb-fechar-form', ev);
+    return () => { window.__pbForm = false; window.removeEventListener('pb-fechar-form', ev); };
+  }, [formAberto]);
+  /* ao abrir ou fechar o formulário, a tela volta ao topo */
+  useEffect(() => { const el = topoRef.current && topoRef.current.closest('.scroll-area'); if (el) el.scrollTop = 0; }, [formAberto]);
+  /* se o aluguel em edição foi excluído, fecha o formulário */
+  useEffect(() => { if (editId && !regs.some(r => r.id === editId)) fechar(); }, [regs, editId]);
+
   /* ao confirmar o "De", abre o calendário do "Até" (já no mês certo e sem aceitar data anterior) */
   const onDe = e => {
     const v = e.target.value;
     setF(prev => ({ ...prev, de: v, ate: (!prev.ate || prev.ate < v) ? v : prev.ate }));
     if (v) setTimeout(() => { const el = ateRef.current; if (el) { el.focus(); try { el.showPicker && el.showPicker(); } catch (_) {} } }, 200);
   };
-  const formRef = React.useRef(null);
   const hj = new Date();
   const [ym, setYm] = useState(hj.getFullYear() * 12 + hj.getMonth());
   useEffect(() => {
@@ -187,35 +204,37 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const vg   = vagasMes(regs, vano, vmes);
   const iso  = d => vano + '-' + p2(vmes + 1) + '-' + p2(d);
   const escolher = fx => setF(prev => ({ ...prev, de: iso(fx[0]), ate: iso(fx[1]) }));
-  /* na tela inicial a faixa abre o lançamento da casa já com as datas; dentro do lançamento só preenche */
-  const clickFaixa = fx => modo === 'resumo' ? onAbrir(idx, iso(fx[0]), iso(fx[1])) : escolher(fx);
+  /* faixa livre: na tela inicial e na lista da casa abre o lançamento já com as datas; dentro do lançamento só preenche */
+  const clickFaixa = fx => modo === 'resumo' ? onAbrir(idx, iso(fx[0]), iso(fx[1])) : formAberto ? escolher(fx) : (escolher(fx), setEditId(null), setFormAberto(true));
   const navBtn = { width:34, height:30, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:16, fontWeight:700, cursor:'pointer' };
   const set  = k => e => setF(prev => ({ ...prev, [k]: e.target.value }));
   const money = k => ({
-    value: f[k], inputMode:'decimal', enterKeyHint: k === 'sin' ? 'done' : 'next',
+    value: f[k], inputMode:'decimal', enterKeyHint: k === 'pago' ? 'done' : 'next',
     onChange: set(k),
     onFocus: () => { const n = parseValor(f[k]); if (f[k]) setF(p => ({ ...p, [k]: n ? String(n).replace('.', ',') : '' })); },
     onBlur:  () => { if (f[k]) setF(p => ({ ...p, [k]: brl(parseValor(f[k])) })); },
   });
   const n      = Math.max(0, dias(f.de, f.ate));
-  const diaria = parseValor(f.dia), sinal = parseValor(f.sin);
-  const total  = Math.round(n * diaria * 100) / 100;
-  const resta  = Math.max(0, total - sinal);
-  const pend   = regs.filter(r => !r.quit).length;
+  const diaria = parseValor(f.dia), sinal = parseValor(f.sin), pago = parseValor(f.pago);
+  const diariaEf = diaria || (pago && n ? Math.round(pago / n * 100) / 100 : 0);
+  const total  = pago ? pago : Math.round(n * diariaEf * 100) / 100;
+  const resta  = pago ? 0 : Math.max(0, total - sinal);
 
   const lancar = () => {
     if (!f.nome.trim())            return onAdd(null, 'Informe o nome de quem alugou');
     if (!f.de || !f.ate || n < 1)  return onAdd(null, 'A data final não pode ser anterior à inicial');
-    if (!diaria)                   return onAdd(null, 'Informe o valor da diária');
+    if (!diariaEf)                 return onAdd(null, 'Informe a diária ou o valor pago');
+    if (pago && sinal)             return onAdd(null, 'Preencha só o Sinal ou só o Pago');
     if (sinal > total)             return onAdd(null, 'O sinal não pode ser maior que o total');
     const outro = regs.find(r => r.id !== editId && f.de <= r.ate && f.ate >= r.de);
     if (outro) { setConflito(outro); return; }
-    if (editId) { onEdit(editId, { nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal }); setEditId(null); setF(FORM0); return; }
-    onAdd({ id: Date.now().toString(36), casa: idx, nome: f.nome.trim(), de: f.de, ate: f.ate, diaria, sinal, quit: sinal >= total });
-    setF(FORM0);
+    const campos = { nome: f.nome.trim(), de: f.de, ate: f.ate, diaria: diariaEf, sinal: pago ? 0 : sinal, pago: pago || 0 };
+    if (editId) { onEdit(editId, campos); fechar(); return; }
+    onAdd({ id: Date.now().toString(36), casa: idx, ...campos, quit: pago > 0 || sinal >= total });
+    fechar();
   };
 
-  /* Enter do celular: avança para o próximo campo; no último, lança o aluguel */
+  /* Enter do celular: avança para o próximo campo; no último, confirma o lançamento */
   const onEnter = e => {
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
     e.preventDefault();
@@ -229,27 +248,22 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   };
 
   const ordenados = [...regs].sort((a, b) => a.de < b.de ? -1 : a.de > b.de ? 1 : 0);
-  const comecarEdicao = r => {
-    setEditId(r.id); setF(formDe(r));
-    setTimeout(() => { if (formRef.current) formRef.current.scrollIntoView({ behavior:'smooth', block:'center' }); }, 60);
-  };
+  const comecarEdicao = r => { setEditId(r.id); setF(formDe(r)); setFormAberto(true); };
 
   const cardStyle = { background:'#fff', borderRadius:14, padding:18, boxShadow:'0 2px 12px rgba(0,0,0,.06)', borderTop:'4px solid ' + c.cor };
-  const titulo =
-    ce('div', { style: modo === 'resumo' ? { display:'flex', flexDirection:'column', alignItems:'center', gap:8, marginBottom:12 } : { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 } },
-      modo === 'resumo'
-        ? ce('button', { onClick:() => onAbrir(idx), style:{ padding:'10px 22px', borderRadius:999, border:'none', background:c.cor, color:'#fff', fontSize:17, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(0,0,0,.15)' } }, '🏠 ' + c.nome)
-        : ce('div', { style:{ fontWeight:700, fontSize:18, color:'#1a3a5c' } }, '🏠 ' + c.nome),
-      regs.length > 0 && ce('span', { style:{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20,
-        background: pend ? '#fffbeb' : '#ecfdf5', color: pend ? '#b45309' : '#059669', border:'1px solid ' + (pend ? '#f59e0b' : '#10b981') } },
-        pend ? '⏳ ' + pend + ' pendente(s)' : '✅ Tudo quitado')
-    );
+  const titulo = modo === 'resumo'
+    ? ce('div', { style:{ display:'flex', justifyContent:'center', marginBottom:12 } },
+        ce('button', { onClick:() => onAbrir(idx), style:{ padding:'10px 22px', borderRadius:999, border:'none', background:c.cor, color:'#fff', fontSize:17, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(0,0,0,.15)' } }, '🏠 ' + c.nome))
+    : ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, marginBottom:12 } },
+        ce('div', { style:{ fontWeight:700, fontSize:18, color:'#1a3a5c' } }, '🏠 ' + c.nome),
+        !formAberto && ce('button', { onClick:abrirForm, style:{ padding:'9px 16px', borderRadius:999, border:'none', background:c.cor, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', boxShadow:'0 2px 8px rgba(0,0,0,.15)' } }, '➕ Lançar aluguel'));
+  const mesCurto = MESES[vmes].slice(0, 3).toLowerCase();
   const vagas =
     ce('div', { style:{ background:c.bg, borderRadius:10, padding:'10px 12px', marginBottom:12 } },
       ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:6, marginBottom:8 } },
         ce('button', { onClick:() => setYm(y => y - 1), style:navBtn }, '‹'),
-        ce('div', { style:{ fontSize:12, fontWeight:700, color:'#1a3a5c', textAlign:'center' } },
-          '📅 Vagas em ' + MESES[vmes] + ' ' + vano, ce('div', { style:{ fontWeight:400, color:'#666' } }, vg.livres + ' de ' + vg.nDias + ' dias livres')),
+        ce('div', { style:{ fontSize:13, fontWeight:700, color:'#1a3a5c', textAlign:'center' } },
+          '📅 Vagas ' + mesCurto + '/' + vano, ce('div', { style:{ fontWeight:400, color:'#666', fontSize:12 } }, vg.livres + ' de ' + vg.nDias + ' dias livres')),
         ce('button', { onClick:() => setYm(y => y + 1), style:navBtn }, '›')),
       vg.faixas.length
         ? ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:6 } },
@@ -257,59 +271,67 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
               style:{ padding:'6px 12px', borderRadius:20, border:'1px solid ' + c.cor, background:'#fff', color:'#059669', fontSize:12, fontWeight:700, cursor:'pointer' } },
               fx[0] === fx[1] ? p2(fx[0]) : p2(fx[0]) + ' a ' + p2(fx[1]))))
         : ce('div', { style:{ fontSize:12, color:'#dc2626', fontWeight:700 } }, 'Sem vagas neste mês'),
-      vg.faixas.length > 0 && ce('div', { style:{ fontSize:10, color:'#999', marginTop:6 } }, (modo === 'resumo' ? 'Toque em uma faixa para lançar nesse período' : 'Toque em uma faixa para preencher "De" e "Até"'))
+      vg.faixas.length > 0 && ce('div', { style:{ fontSize:10, color:'#999', marginTop:6 } }, formAberto ? 'Toque em uma faixa para preencher "De" e "Até"' : 'Toque em uma faixa para lançar nesse período')
     );
-  if (modo === 'resumo') return ce('div', { style:cardStyle }, titulo, vagas);
-  const voltar = ce('button', { onClick:onVoltar, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar');
-  return ce('div', { style:cardStyle }, voltar, titulo, vagas,
-    conflito && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
-      ce('div', { style:{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:340, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
-        ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:6 } }, '⚠️'),
-        ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:8 } }, 'Datas em conflito'),
-        ce('div', { style:{ fontSize:13, color:'#555', textAlign:'center', lineHeight:1.5, marginBottom:18 } },
-          'O período ' + dataBR(f.de) + ' a ' + dataBR(f.ate) + ' se sobrepõe ao aluguel de ' + conflito.nome + ' (' + dataBR(conflito.de) + ' a ' + dataBR(conflito.ate) + ') na ' + c.nome + '. Corrija as datas ou exclua um dos aluguéis.'),
-        ce('button', { onClick:() => setConflito(null), style:{ width:'100%', padding:12, borderRadius:10, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', marginBottom:8 } }, '✏️ Corrigir as datas'),
-        ce('button', { onClick:() => { const id = conflito.id; setConflito(null); onDel(id); }, style:{ width:'100%', padding:12, borderRadius:10, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:14, fontWeight:700, cursor:'pointer' } }, '🗑️ Excluir o aluguel de ' + conflito.nome))),
-    editId && ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } },
-      '✏️ Editando aluguel',
-      ce('button', { onClick:() => { setEditId(null); setF(FORM0); }, style:{ padding:'6px 12px', borderRadius:8, border:'1px solid #93c5fd', background:'#fff', color:'#1e40af', fontSize:12, fontWeight:700, cursor:'pointer' } }, 'Cancelar')),
-    /* formulário */
-    ce('div', { ref:formRef, onKeyDown:onEnter, className:'form-grid', style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 } },
+  if (modo === 'resumo') return ce('div', { ref:topoRef, style:cardStyle }, titulo, vagas);
+
+  const voltar = ce('button', { onClick: formAberto ? fechar : onVoltar, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar');
+  const aviso = conflito && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
+    ce('div', { style:{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:340, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
+      ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:6 } }, '⚠️'),
+      ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:8 } }, 'Datas em conflito'),
+      ce('div', { style:{ fontSize:13, color:'#555', textAlign:'center', lineHeight:1.5, marginBottom:18 } },
+        'O período ' + dataBR(f.de) + ' a ' + dataBR(f.ate) + ' se sobrepõe ao aluguel de ' + conflito.nome + ' (' + dataBR(conflito.de) + ' a ' + dataBR(conflito.ate) + ') na ' + c.nome + '. Corrija as datas ou exclua um dos aluguéis.'),
+      ce('button', { onClick:() => setConflito(null), style:{ width:'100%', padding:12, borderRadius:10, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', marginBottom:8 } }, '✏️ Corrigir as datas'),
+      ce('button', { onClick:() => { const id = conflito.id; setConflito(null); onDel(id); }, style:{ width:'100%', padding:12, borderRadius:10, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:14, fontWeight:700, cursor:'pointer' } }, '🗑️ Excluir o aluguel de ' + conflito.nome)));
+
+  /* ── tela própria do lançamento ── */
+  const inputPeq = { ...inputStyle, padding:'10px 6px', fontSize:12 };
+  const formulario = ce(React.Fragment, null,
+    ce('div', { style:{ background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } }, editId ? '✏️ Editando aluguel' : '➕ Novo aluguel'),
+    ce('div', { ref:formRef, onKeyDown:onEnter, style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 } },
       ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'next' })),
       ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:onDe })),
       ce(Campo, { label:'Até' }, ce('input', { ref:ateRef, style:inputStyle, type:'date', value:f.ate, min:f.de || undefined, onChange:set('ate') })),
-      ce(Campo, { label:'Valor da diária' },   ce('input', { style:inputStyle, placeholder:'Ex.: 300', ...money('dia') })),
-      ce(Campo, { label:'Sinal da reserva' },  ce('input', { style:inputStyle, placeholder:'Ex.: 500', ...money('sin') }))
+      ce('div', { style:{ gridColumn:'1 / -1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } },
+        ce(Campo, { label:'Diária' }, ce('input', { style:inputPeq, placeholder:'Ex. 300', ...money('dia') })),
+        ce(Campo, { label:'Sinal' },  ce('input', { style:inputPeq, placeholder:'Ex. 500', ...money('sin') })),
+        ce(Campo, { label:'Pago' },   ce('input', { style:inputPeq, placeholder:'Ex. 900', ...money('pago') })))
     ),
-    /* prévia */
     ce('div', { style:{ display:'flex', gap:6, margin:'12px 0' } },
       ...[[n + (n === 1 ? ' dia' : ' dias'), '#1a3a5c', 'período'], [brl(total), '#1a3a5c', 'total'], [brl(resta), resta ? '#dc2626' : '#059669', 'a quitar']].map(([v, cor, l]) =>
         ce('div', { key:l, style:{ flex:1, background:c.bg, borderRadius:8, padding:'8px 4px', textAlign:'center' } },
           ce('div', { style:{ fontWeight:700, fontSize:13, color:cor } }, v),
           ce('div', { style:{ fontSize:10, color:'#888', marginTop:1 } }, l)))
     ),
-    ce('button', { onClick:lancar, style:{ width:'100%', padding:12, borderRadius:10, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' } }, editId ? '💾 Salvar alterações' : '📥 Lançar aluguel'),
-    /* lançamentos */
-    ce('div', { style:{ marginTop:14 } },
-      ordenados.length === 0
-        ? ce('div', { style:{ textAlign:'center', padding:'14px 0', color:'#bbb', fontSize:13 } }, '📭 Nenhum aluguel lançado')
-        : ordenados.map(r => ce('div', { key:r.id, style:{ padding:'10px 12px', marginBottom:8, borderRadius:10, background: r.quit ? '#ecfdf5' : '#fffbeb', border:'1px solid ' + (r.quit ? '#10b981' : '#f59e0b') } },
-            ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center' } },
-              ce('span', { style:{ fontWeight:700, fontSize:14, color:'#1a3a5c' } }, r.nome),
-              ce('span', { style:{ fontWeight:700, fontSize:12, color: r.quit ? '#059669' : '#b45309' } }, r.quit ? '✅ Concluído' : '⏳ Pendente')),
-            ce('div', { style:{ fontSize:12, color:'#666', margin:'4px 0' } }, dataBR(r.de) + ' a ' + dataBR(r.ate) + ' · ' + dias(r.de, r.ate) + ' dias × ' + brl(r.diaria)),
-            ce('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#444' } },
-              ce('span', null, 'Total ' + brl(totalR(r))),
-              ce('span', null, 'Sinal ' + brl(r.sinal)),
-              ce('span', { style:{ fontWeight:700, color: r.quit ? '#059669' : '#dc2626' } }, 'Resta ' + brl(restaR(r)))),
-            ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 } },
-              ce('button', { onClick:() => onQuit(r.id), style:{ flex:'1 1 100%', padding:8, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, r.quit ? '↩️ Reabrir' : '💰 Marcar quitado'),
-              ce('button', { onClick:() => comecarEdicao(r), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, '✏️ Editar'),
-              ce('button', { onClick:() => onRecibo(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🧾 Recibo'),
-              ce('button', { onClick:() => onDel(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🗑️'))
-          ))
-    )
+    ce('div', { style:{ display:'flex', gap:10 } },
+      ce('button', { onClick:lancar, style:{ flex:1.4, padding:13, borderRadius:999, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:15, fontWeight:700, cursor:'pointer' } }, '✅ Confirmar'),
+      ce('button', { onClick:() => editId ? onDel(editId) : fechar(), style:{ flex:1, padding:13, borderRadius:999, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:15, fontWeight:700, cursor:'pointer' } }, '🗑️ Excluir'))
   );
+
+  /* ── lista de aluguéis da casa ── */
+  const botao = (cor, borda) => ({ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid ' + borda, background:'#fff', color:cor, fontSize:12, fontWeight:700, cursor:'pointer' });
+  const listaAlugueis = ce('div', { style:{ marginTop:4 } },
+    ordenados.length === 0
+      ? ce('div', { style:{ textAlign:'center', padding:'14px 0', color:'#bbb', fontSize:13 } }, '📭 Nenhum aluguel lançado')
+      : ordenados.map(r => ce('div', { key:r.id, style:{ padding:'10px 12px', marginBottom:8, borderRadius:10, background: r.quit ? '#ecfdf5' : '#fffbeb', border:'1px solid ' + (r.quit ? '#10b981' : '#f59e0b') } },
+          ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center' } },
+            ce('span', { style:{ fontWeight:700, fontSize:14, color:'#1a3a5c' } }, r.nome),
+            ce('span', { style:{ fontWeight:700, fontSize:12, color: r.quit ? '#059669' : '#b45309' } }, r.quit ? '✅ Quitado' : '⏳ Pendente')),
+          ce('div', { style:{ fontSize:12, color:'#666', margin:'4px 0' } }, dataBR(r.de) + ' a ' + dataBR(r.ate) + ' · ' + dias(r.de, r.ate) + ' dias × ' + brl(r.diaria)),
+          ce('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#444' } },
+            ce('span', null, 'Total ' + brl(totalR(r))),
+            ce('span', null, r.pago > 0 ? 'Pago ' + brl(r.pago) : 'Sinal ' + brl(r.sinal)),
+            ce('span', { style:{ fontWeight:700, color: r.quit ? '#059669' : '#dc2626' } }, 'Resta ' + brl(restaR(r)))),
+          ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 } },
+            ce('button', { onClick:() => onQuit(r.id), style:{ ...botao('#1a3a5c', '#e5e7eb'), flex:'1 1 100%', padding:8 } }, r.quit ? '↩️ Reabrir (voltar a pendente)' : '💰 Marcar quitado'),
+            ce('button', { onClick:() => comecarEdicao(r), style:botao('#1a3a5c', '#e5e7eb') }, '✏️ Editar'),
+            ce('button', { onClick:() => onRecibo(r.id), style:botao('#1d4ed8', '#bfdbfe') }, '🧾 Recibo'),
+            ce('button', { onClick:() => onDel(r.id), style:botao('#dc2626', '#fecaca') }, '🗑️'))
+        ))
+  );
+
+  return ce('div', { ref:topoRef, style:cardStyle }, voltar, titulo, vagas, aviso, formAberto ? formulario : listaAlugueis);
 }
 
 /* ─── recibos ─────────────────────────────────────────────────────────── */
@@ -340,7 +362,7 @@ function extenso(v) {
   if (cents > 0) partes.push(inteiro(cents) + (cents === 1 ? ' centavo' : ' centavos'));
   return partes.length ? partes.join(' e ') : 'zero real';
 }
-const validos  = r => { const tot = totalR(r), rest = Math.max(0, tot - r.sinal); return { sinal: r.sinal > 0, quit: r.quit && rest > 0, total: r.quit && tot > 0 }; };
+const validos  = r => { if (r.pago > 0) return { sinal:false, quit:false, total:true }; const tot = totalR(r), rest = Math.max(0, tot - r.sinal); return { sinal: r.sinal > 0, quit: r.quit && rest > 0, total: r.quit && tot > 0 }; };
 const tipoPadrao = r => { const v = validos(r); return (v.quit && r.sinal > 0) ? 'quit' : v.total ? 'total' : 'sinal'; };
 const estavel  = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
 const SEQ_KEY  = 'pousada_belchior_recibo_seq';
@@ -417,15 +439,21 @@ function App() {
   const abrirRecibo = id => { const r = dados.find(x => x.id === id); setRecibo({ id, tipo: tipoPadrao(r) }); window.scrollTo(0, 0); };
   const fecharRecibo = () => { if (pushedRef.current) history.back(); else setRecibo(null); };
   const [modalExcluir, setModalExcluir] = useState(null);
+  const [modalStatus, setModalStatus] = useState(null);   /* aluguel cujo status (pendente/quitado) vai mudar */
   const [senhaInput,   setSenhaInput]   = useState('');
   const [senhaErro,    setSenhaErro]    = useState(false);
-  modalRef.current = modalExcluir;
+  modalRef.current = modalExcluir || modalStatus;
   reciboRef.current = recibo;
 
   useEffect(() => {
     const onPop = () => {
       if (modalRef.current) {            /* voltar com o pedido de senha aberto: só fecha */
-        setModalExcluir(null); setSenhaInput(''); setSenhaErro(false);
+        setModalExcluir(null); setModalStatus(null); setSenhaInput(''); setSenhaErro(false);
+        try { history.pushState({ pb:1 }, ''); pushedRef.current = true; } catch (_) {}
+        return;
+      }
+      if (window.__pbForm) {              /* voltar com o formulário de lançamento aberto: fecha só o formulário */
+        window.dispatchEvent(new Event('pb-fechar-form'));
         try { history.pushState({ pb:1 }, ''); pushedRef.current = true; } catch (_) {}
         return;
       }
@@ -550,8 +578,7 @@ function App() {
   }, [dados]);
 
   const pendentes = dados.filter(r => !r.quit).length;
-  const mesAtual0 = hoje.getFullYear() + '-' + p2(hoje.getMonth() + 1) + '-01';   /* 1º dia do mês corrente */
-  const doMesEFuturos = dados.filter(r => r.ate >= mesAtual0);
+  const nQuitados = dados.filter(r => r.quit).length;
   const aReceber  = dados.reduce((a, r) => a + restaR(r), 0);
 
   const adicionar = useCallback((r, erro) => {
@@ -559,16 +586,22 @@ function App() {
     setDados(prev => [...prev, r]);
     setToast('✅ Aluguel de ' + r.nome + ' lançado na ' + CASAS[r.casa].nome + '!');
   }, []);
-  const alternarQuit = id => {
+  /* mudar entre pendente e quitado: pede confirmação e a senha, para evitar alteração por engano */
+  const aplicarStatus = id => setDados(prev => prev.map(x => x.id === id ? { ...x, quit: !x.quit, ...(x.quit ? { pago: 0 } : {}) } : x));
+  const textoStatus = r => 'Tem certeza da mudança? O aluguel de ' + r.nome + ' (' + CASAS[r.casa].nome + ') vai de ' + (r.quit ? 'Quitado para Pendente' : 'Pendente para Quitado') + '.';
+  const pedirStatus = id => {
     const r = dados.find(x => x.id === id);
-    if (r && r.quit && r.sinal >= totalR(r)) return setToast('ℹ️ O sinal já cobre o total: não há saldo para reabrir');
-    setDados(prev => prev.map(x => x.id === id ? { ...x, quit: !x.quit } : x));
+    if (!r) return;
+    if (r.quit && r.sinal >= totalR(r) && !(r.pago > 0)) return setToast('ℹ️ O sinal já cobre o total: não há saldo para reabrir');
+    if (!NUVEM) { if (confirm(textoStatus(r))) aplicarStatus(id); return; }
+    setModalStatus(id); setSenhaInput(''); setSenhaErro(false);
   };
   /* salvar edição: se o sinal passa a cobrir o total o aluguel conclui; se deixava de cobrir, volta a pendente */
   const editar = (id, c) => {
     setDados(prev => prev.map(x => {
       if (x.id !== id) return x;
-      const antes = x.sinal >= totalR(x), agora = c.sinal >= totalR(c);
+      const cobre = o => o.pago > 0 || o.sinal >= totalR(o);
+      const antes = cobre(x), agora = cobre(c);
       return { ...x, ...c, quit: agora ? true : antes ? false : x.quit };
     }));
     setToast('✏️ Aluguel atualizado!');
@@ -584,6 +617,13 @@ function App() {
     if (!fb) { await fbPromise; if (!fb) throw new Error('network'); }
     try { await fb.auth.signInWithEmailAndPassword(EMAIL_APP, derivar(senha)); await salvarHash(senha); return true; }
     catch (e) { if (/network/.test(e.code || '')) throw e; return false; }
+  };
+  const confirmarStatus = () => {
+    const id = modalStatus;
+    const erro = () => { setSenhaErro(true); setSenhaInput(''); };
+    verificarSenha(senhaInput).then(ok => {
+      if (ok) { aplicarStatus(id); setModalStatus(null); setSenhaInput(''); setSenhaErro(false); setToast('✅ Status alterado'); } else erro();
+    }).catch(erro);
   };
   const confirmarExclusao = () => {
     const apagar = () => { setDados(prev => prev.filter(r => r.id !== modalExcluir)); setModalExcluir(null); setSenhaInput(''); setToast('🗑️ Lançamento removido.'); };
@@ -615,7 +655,7 @@ function App() {
           ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:26, width:'100%', textAlign:'center', textShadow:'0 2px 12px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Pousada Belchior'),
           ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:14, letterSpacing:2, paddingLeft:2, marginTop:3, width:'100%', textAlign:'center', textShadow:'0 2px 10px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Balneário Magistério')),
         ce('div', { style:{ display:'flex', gap:8, marginTop:14 } },
-          ...[[doMesEFuturos.length, '#fff', 'aluguéis ›', 'alugueis'], [pendentes, '#fbbf24', 'pendentes ›', 'pendentes'], [brl(aReceber), '#fff', 'a receber', null]].map(([val, cor, label, alvo]) =>
+          ...[[nQuitados, '#fff', 'quitados ›', 'quitados'], [pendentes, '#fbbf24', 'pendentes ›', 'pendentes'], [brl(aReceber), '#fff', 'a receber', null]].map(([val, cor, label, alvo]) =>
             ce(alvo ? 'button' : 'div', { key:label, onClick: alvo ? () => abrirLista(alvo) : undefined, style:{ flex:1, background:'rgba(8,30,50,.40)', backdropFilter:'blur(3px)', WebkitBackdropFilter:'blur(3px)', borderRadius:8, padding:'8px 6px', textAlign:'center', border: alvo ? '1px solid rgba(255,255,255,.35)' : 'none', cursor: alvo ? 'pointer' : 'default', fontFamily:'inherit' } },
               ce('div', { style:{ color:cor, fontWeight:700, fontSize:15 } }, val),
               ce('div', { style:{ color:'#e6f1f7', fontSize:10, marginTop:1 } }, label))))
@@ -636,7 +676,7 @@ function App() {
   /* ── aba casas ── */
   function renderCasas() {
     const abrirCasa = (i, de, ate) => { setAberta({ idx:i, de:de || '', ate:ate || '' }); empilhar(); window.scrollTo(0, 0); };
-    const comum = i => ({ idx:i, regs:dados.filter(r => r.casa === i), onAdd:adicionar, onQuit:alternarQuit, onAbrir:abrirCasa, onVoltar:irInicio, onRecibo:abrirRecibo, onEdit:editar,
+    const comum = i => ({ idx:i, regs:dados.filter(r => r.casa === i), onAdd:adicionar, onQuit:pedirStatus, onAbrir:abrirCasa, onVoltar:irInicio, onRecibo:abrirRecibo, onEdit:editar,
       onDel:pedirExclusao });
     if (aberta) return ce(CasaCard, { key:'d' + aberta.idx + aberta.de + (aberta.edit ? aberta.edit.id : ''), ...comum(aberta.idx), modo:'detalhe', pre:aberta });
     return ce('div', { className:'casas-grid', style:{ display:'grid', gridTemplateColumns:'1fr', gap:14 } },
@@ -646,8 +686,8 @@ function App() {
   /* ── tela de aluguéis (mês corrente e futuros) ou de pendentes ── */
   function renderLista() {
     const pend = lista === 'pendentes';
-    const itens = (pend ? dados.filter(r => !r.quit) : doMesEFuturos)
-      .slice().sort((a, b) => a.de < b.de ? -1 : a.de > b.de ? 1 : a.casa - b.casa);
+    const itens = (pend ? dados.filter(r => !r.quit) : dados.filter(r => r.quit))
+      .slice().sort((a, b) => { const k = a.de < b.de ? -1 : a.de > b.de ? 1 : a.casa - b.casa; return pend ? k : -k; });   /* quitados: histórico, do mais recente ao mais antigo */
     const somaTotal = itens.reduce((a, r) => a + totalR(r), 0);
     const somaResta = itens.reduce((a, r) => a + restaR(r), 0);
     const linhas = [];
@@ -667,10 +707,10 @@ function App() {
         ce('div', { style:{ fontSize:12, color:'#666', marginBottom:6 } }, dataBR(r.de) + ' a ' + dataBR(r.ate) + ' · ' + dias(r.de, r.ate) + ' dias × ' + brl(r.diaria)),
         ce('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#444' } },
           ce('span', null, 'Total ' + brl(totalR(r))),
-          ce('span', null, 'Sinal ' + brl(r.sinal)),
+          ce('span', null, r.pago > 0 ? 'Pago ' + brl(r.pago) : 'Sinal ' + brl(r.sinal)),
           ce('span', { style:{ fontWeight:700, color: r.quit ? '#059669' : '#dc2626' } }, 'Resta ' + brl(restaR(r)))),
         ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:8, marginTop:8 } },
-          ce('button', { onClick:() => alternarQuit(r.id), style:{ flex:'1 1 100%', padding:8, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, r.quit ? '↩️ Reabrir' : '💰 Marcar quitado'),
+          ce('button', { onClick:() => pedirStatus(r.id), style:{ flex:'1 1 100%', padding:8, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, r.quit ? '↩️ Reabrir' : '💰 Marcar quitado'),
           ce('button', { onClick:() => abrirEdicao(r), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:12, fontWeight:700, cursor:'pointer' } }, '✏️ Editar'),
           ce('button', { onClick:() => abrirRecibo(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🧾 Recibo'),
           ce('button', { onClick:() => pedirExclusao(r.id), style:{ flex:1, padding:'8px 6px', borderRadius:8, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:12, fontWeight:700, cursor:'pointer' } }, '🗑️'))
@@ -681,7 +721,7 @@ function App() {
       ce('button', { onClick:irInicio, style:{ padding:'8px 16px', borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:12 } }, '‹ Voltar')),
       ce('div', { className:'scroll-area' },
       itens.length === 0
-        ? ce('div', { style:{ textAlign:'center', padding:'30px 0', color:'#bbb', fontSize:14 } }, pend ? '🎉 Nenhum aluguel pendente' : '📭 Nenhum aluguel neste mês ou nos próximos')
+        ? ce('div', { style:{ textAlign:'center', padding:'30px 0', color:'#bbb', fontSize:14 } }, pend ? '🎉 Nenhum aluguel pendente' : '📭 Nenhum aluguel quitado')
         : linhas)
     );
   }
@@ -790,6 +830,28 @@ function App() {
     );
   }
 
+  /* ── modal: confirmar mudança de status com senha ── */
+  function renderModalStatus() {
+    if (!modalStatus) return null;
+    const r = dados.find(x => x.id === modalStatus);
+    if (!r) return null;
+    const fechar = () => { setModalStatus(null); setSenhaInput(''); setSenhaErro(false); };
+    return ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
+      ce('div', { style:{ background:'#fff', borderRadius:16, padding:24, width:'100%', maxWidth:330, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
+        ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:6 } }, '⚠️'),
+        ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:8 } }, 'Tem certeza da mudança?'),
+        ce('div', { style:{ fontSize:13, color:'#555', textAlign:'center', lineHeight:1.5, marginBottom:16 } },
+          'O aluguel de ' + r.nome + ' (' + CASAS[r.casa].nome + ') vai de ' + (r.quit ? 'Quitado para Pendente' : 'Pendente para Quitado') + '. Digite a senha para concluir.'),
+        ce('input', { type:'password', placeholder:'Senha', value:senhaInput, autoFocus:true,
+          onChange:e => { setSenhaInput(e.target.value); setSenhaErro(false); },
+          onKeyDown:e => { if (e.key === 'Enter') confirmarStatus(); },
+          style:{ width:'100%', padding:'11px 14px', borderRadius:999, fontSize:15, textAlign:'center', border: senhaErro ? '2px solid #ef4444' : '2px solid #e5e7eb', outline:'none', marginBottom: senhaErro ? 6 : 16 } }),
+        senhaErro && ce('div', { style:{ color:'#ef4444', fontSize:12, marginBottom:12, textAlign:'center' } }, '❌ Senha incorreta'),
+        ce('div', { style:{ display:'flex', gap:10 } },
+          ce('button', { onClick:fechar, style:{ flex:1, padding:11, borderRadius:999, border:'2px solid #e5e7eb', background:'#fff', color:'#555', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Cancelar'),
+          ce('button', { onClick:confirmarStatus, style:{ flex:1, padding:11, borderRadius:999, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Confirmar'))));
+  }
+
   /* ── acesso: a senha é pedida toda vez que o app abre ── */
   const telaCheia = (...filhos) => ce('div', { style:{ minHeight:'100vh', background:'linear-gradient(rgba(0,20,40,.10), rgba(0,20,40,.28)), url("' + FOTO_ENTRADA + '") center / cover no-repeat, #0f2340', display:'flex', alignItems:'center', justifyContent:'center', padding:16 } },
     ce('div', { style:{ width:'100%', maxWidth:520, textAlign:'center', color:'#fff' } }, ...filhos));
@@ -829,6 +891,7 @@ function App() {
             style:{ flex:1, padding:11, borderRadius:9, border:'2px solid #e5e7eb', background:'#fff', color:'#555', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Cancelar'),
           ce('button', { onClick:confirmarExclusao,
             style:{ flex:1, padding:11, borderRadius:9, border:'none', background:'linear-gradient(135deg,#dc2626,#b91c1c)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer' } }, 'Apagar')))),
+    renderModalStatus(),
     renderHeader(),
     congelado
       ? ce('div', { className:'app-frozen-body' },

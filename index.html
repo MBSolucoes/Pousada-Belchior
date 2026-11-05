@@ -227,7 +227,7 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const navBtn = { width:34, height:30, borderRadius:8, border:'2px solid #e5e7eb', background:'#fff', color:'#1a3a5c', fontSize:16, fontWeight:700, cursor:'pointer' };
   const set  = k => e => setF(prev => ({ ...prev, [k]: e.target.value }));
   const money = k => ({
-    value: f[k], inputMode:'decimal', enterKeyHint: k === 'sin' ? 'done' : 'next',
+    value: f[k], inputMode:'decimal', enterKeyHint: k === 'sin' ? 'done' : 'enter',   /* 'next' faria o Android pular direto para o próximo campo de texto, ignorando as datas */
     onChange: set(k),
     onFocus: () => { const n = parseValor(f[k]); if (f[k]) setF(p => ({ ...p, [k]: n ? String(n).replace('.', ',') : '' })); },
     onBlur:  () => { if (f[k]) setF(p => ({ ...p, [k]: brl(parseValor(f[k])) })); },
@@ -311,11 +311,11 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
   const formulario = ce(React.Fragment, null,
     ce('div', { style:{ background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } }, editId ? '✏️ Editando aluguel' : '➕ Novo aluguel'),
     ce('div', { ref:formRef, onKeyDown:onEnter, style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 } },
-      ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'next' })),
-      ce(Campo, { label:'Celular', full:true }, ce('input', { style:inputStyle, type:'tel', inputMode:'tel', placeholder:'(51) 91234-5678', value:f.cel, onChange:e => setF(prev => ({ ...prev, cel: formatCel(e.target.value) })),
+      ce(Campo, { label:'Nome de quem alugou', full:true }, ce('input', { style:inputStyle, value:f.nome, onChange:set('nome'), autoComplete:'off', enterKeyHint:'enter' })),
+      ce(Campo, { label:'Celular', full:true }, ce('input', { style:inputStyle, type:'tel', inputMode:'tel', placeholder:'(51) 00000-0000', value:f.cel, onChange:e => setF(prev => ({ ...prev, cel: formatCel(e.target.value) })),
         onFocus:() => setF(prev => prev.cel ? prev : { ...prev, cel:'(51) ' }),   /* DDD 51 já vem preenchido */
         onBlur:() => setF(prev => prev.cel.replace(/\D/g, '').length <= 2 ? { ...prev, cel:'' } : prev),   /* só o DDD = campo vazio */
-        autoComplete:'off', enterKeyHint:'next' })),
+        autoComplete:'off', enterKeyHint:'enter' })),
       ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:onDe })),
       ce(Campo, { label:'Até' }, ce('input', { ref:ateRef, style:inputStyle, type:'date', value:f.ate, min:f.de || undefined, onChange:set('ate') })),
       ce('div', { style:{ gridColumn:'1 / -1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } },

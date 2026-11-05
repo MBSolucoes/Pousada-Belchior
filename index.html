@@ -150,9 +150,9 @@ function Toast({ msg, onDone }) {
 
 /* ─── campo de texto/valor ───────────────────────────────────────────── */
 const inputStyle = { width:'100%', padding:'10px 12px', borderRadius:9, border:'2px solid #e5e7eb', fontSize:14, outline:'none', background:'#fff' };
-function Campo({ label, children, full }) {
+function Campo({ label, children, full, centro }) {
   return ce('label', { style:{ display:'block', gridColumn: full ? '1 / -1' : 'auto' } },
-    ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, label),
+    ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3, textAlign: centro ? 'center' : 'left' } }, label),
     children
   );
 }
@@ -296,7 +296,7 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
       ce('button', { onClick:() => { const id = conflito.id; setConflito(null); onDel(id); }, style:{ width:'100%', padding:12, borderRadius:10, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:14, fontWeight:700, cursor:'pointer' } }, '🗑️ Excluir o aluguel de ' + conflito.nome)));
 
   /* ── tela própria do lançamento ── */
-  const inputPeq = { ...inputStyle, padding:'10px 6px', fontSize:12 };
+  const inputPeq = { ...inputStyle, padding:'0 6px', fontSize:12, height:40 };   /* mesma altura das pílulas de baixo */
   const formulario = ce(React.Fragment, null,
     ce('div', { style:{ background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:10, padding:'8px 12px', marginBottom:12, fontSize:13, color:'#1e40af', fontWeight:700 } }, editId ? '✏️ Editando aluguel' : '➕ Novo aluguel'),
     ce('div', { ref:formRef, onKeyDown:onEnter, style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 } },
@@ -304,15 +304,15 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
       ce(Campo, { label:'De' },  ce('input', { style:inputStyle, type:'date', value:f.de,  onChange:onDe })),
       ce(Campo, { label:'Até' }, ce('input', { ref:ateRef, style:inputStyle, type:'date', value:f.ate, min:f.de || undefined, onChange:set('ate') })),
       ce('div', { style:{ gridColumn:'1 / -1', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } },
-        ce(Campo, { label:'Diária' }, ce('input', { style:inputPeq, placeholder:'Ex. 300', ...money('dia') })),
-        ce(Campo, { label:'Sinal' },  ce('input', { style:inputPeq, placeholder:'Ex. 500', ...money('sin') })),
-        ce(Campo, { label:'Pago (automático)' }, ce('input', { style:{ ...inputPeq, background:'#f3f4f6', color:'#059669', fontWeight:700 }, readOnly:true, tabIndex:-1, value: pago ? brl(pago) : '', placeholder:'—' })))
+        ce(Campo, { label:'Diária', centro:true }, ce('input', { style:inputPeq, placeholder:'Ex. 300', ...money('dia') })),
+        ce(Campo, { label:'Sinal', centro:true },  ce('input', { style:inputPeq, placeholder:'Ex. 500', ...money('sin') })),
+        ce(Campo, { label:'TOTAL', centro:true }, ce('input', { style:{ ...inputPeq, background:'#f3f4f6', color:'#059669', fontWeight:700 }, readOnly:true, tabIndex:-1, value: total > 0 ? brl(total) : '', placeholder:'—' })))
     ),
-    ce('div', { style:{ display:'flex', gap:6, margin:'12px 0' } },
-      ...[[n + (n === 1 ? ' dia' : ' dias'), '#1a3a5c', 'período'], [brl(total), '#1a3a5c', 'total'], [brl(resta), resta ? '#dc2626' : '#059669', 'a quitar']].map(([v, cor, l]) =>
-        ce('div', { key:l, style:{ flex:1, background:c.bg, borderRadius:8, padding:'8px 4px', textAlign:'center' } },
-          ce('div', { style:{ fontWeight:700, fontSize:13, color:cor } }, v),
-          ce('div', { style:{ fontSize:10, color:'#888', marginTop:1 } }, l)))
+    ce('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, margin:'12px 0' } },
+      ...[[n + (n === 1 ? ' dia' : ' dias'), '#1a3a5c', 'Período'], [brl(total), '#1a3a5c', 'TOTAL'], [brl(resta), resta ? '#dc2626' : '#059669', 'SALDO']].map(([v, cor, l]) =>
+        ce('div', { key:l },
+          ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3, textAlign:'center' } }, l),
+          ce('div', { style:{ height:40, display:'flex', alignItems:'center', justifyContent:'center', background:c.bg, borderRadius:9, fontWeight:700, fontSize:13, color:cor, whiteSpace:'nowrap' } }, v)))
     ),
     ce('div', { style:{ display:'flex', gap:10 } },
       ce('button', { onClick:lancar, style:{ flex:1.4, padding:13, borderRadius:999, border:'none', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', color:'#fff', fontSize:15, fontWeight:700, cursor:'pointer' } }, '✅ Confirmar'),

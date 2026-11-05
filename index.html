@@ -609,16 +609,16 @@ function App() {
 
   /* ── header ── */
   function renderHeader() {
-    return ce('div', { style:{ position:'relative', background:'linear-gradient(135deg,#1a3a5c,#0f2340)', padding:'20px 16px 16px', boxShadow:'0 4px 20px rgba(0,0,0,.3)' } },
+    return ce('div', { style:{ position:'relative', background:'linear-gradient(rgba(0,20,40,.18), rgba(0,20,40,.40)), url("' + FOTO_ENTRADA + '") center 62% / cover no-repeat, #0f2340', padding:'20px 16px 16px', boxShadow:'0 4px 20px rgba(0,0,0,.3)' } },
       ce('div', { style:{ maxWidth:700, margin:'0 auto' } },
         ce('div', { style:{ display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', width:'100%' } },
-          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:26, width:'100%', textAlign:'center' } }, 'Pousada Belchior'),
-          ce('div', { style:{ color:'#94b8d8', fontSize:14, letterSpacing:2, paddingLeft:2, marginTop:3, width:'100%', textAlign:'center' } }, 'Balneário Magistério')),
+          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:26, width:'100%', textAlign:'center', textShadow:'0 2px 12px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Pousada Belchior'),
+          ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:14, letterSpacing:2, paddingLeft:2, marginTop:3, width:'100%', textAlign:'center', textShadow:'0 2px 10px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Balneário Magistério')),
         ce('div', { style:{ display:'flex', gap:8, marginTop:14 } },
           ...[[doMesEFuturos.length, '#fff', 'aluguéis ›', 'alugueis'], [pendentes, '#fbbf24', 'pendentes ›', 'pendentes'], [brl(aReceber), '#fff', 'a receber', null]].map(([val, cor, label, alvo]) =>
-            ce(alvo ? 'button' : 'div', { key:label, onClick: alvo ? () => abrirLista(alvo) : undefined, style:{ flex:1, background:'rgba(255,255,255,.10)', borderRadius:8, padding:'8px 6px', textAlign:'center', border: alvo ? '1px solid rgba(255,255,255,.35)' : 'none', cursor: alvo ? 'pointer' : 'default', fontFamily:'inherit' } },
+            ce(alvo ? 'button' : 'div', { key:label, onClick: alvo ? () => abrirLista(alvo) : undefined, style:{ flex:1, background:'rgba(8,30,50,.40)', backdropFilter:'blur(3px)', WebkitBackdropFilter:'blur(3px)', borderRadius:8, padding:'8px 6px', textAlign:'center', border: alvo ? '1px solid rgba(255,255,255,.35)' : 'none', cursor: alvo ? 'pointer' : 'default', fontFamily:'inherit' } },
               ce('div', { style:{ color:cor, fontWeight:700, fontSize:15 } }, val),
-              ce('div', { style:{ color:'#94b8d8', fontSize:10, marginTop:1 } }, label))))
+              ce('div', { style:{ color:'#e6f1f7', fontSize:10, marginTop:1 } }, label))))
       )
     );
   }

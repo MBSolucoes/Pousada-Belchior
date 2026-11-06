@@ -175,6 +175,49 @@ const CampoSenha = React.forwardRef(function CampoSenha({ style, ...rest }, ref)
       style:{ position:'absolute', right:6, top:0, bottom:0, width:40, border:'none', background:'transparent', color: ver ? '#1a3a5c' : '#6b7280', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 } }, icone));
 });
 
+/* quadro para assinar com o dedo: devolve um PNG transparente já recortado */
+function PadAssinatura({ onSalvar, onCancelar }) {
+  const cv = React.useRef(null), desenhando = React.useRef(false), ultimo = React.useRef(null);
+  const [vazio, setVazio] = useState(true);
+  const pos = e => { const r = cv.current.getBoundingClientRect(); return { x:(e.clientX - r.left) * cv.current.width / r.width, y:(e.clientY - r.top) * cv.current.height / r.height }; };
+  const ini = e => {
+    e.preventDefault();
+    try { cv.current.setPointerCapture(e.pointerId); } catch (_) {}
+    desenhando.current = true; const p = pos(e); ultimo.current = p;
+    const g = cv.current.getContext('2d'); g.fillStyle = '#111'; g.beginPath(); g.arc(p.x, p.y, 1.8, 0, 7); g.fill();
+    setVazio(false);
+  };
+  const mov = e => {
+    if (!desenhando.current) return;
+    e.preventDefault();
+    const g = cv.current.getContext('2d'), p = pos(e);
+    g.strokeStyle = '#111'; g.lineWidth = 3.4; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(ultimo.current.x, ultimo.current.y); g.lineTo(p.x, p.y); g.stroke();
+    ultimo.current = p;
+  };
+  const fim = () => { desenhando.current = false; };
+  const limpar = () => { const c = cv.current; c.getContext('2d').clearRect(0, 0, c.width, c.height); setVazio(true); };
+  const salvar = () => {
+    const c = cv.current, W = c.width, H = c.height, d = c.getContext('2d').getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < x0) return;
+    const m = 6; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W - 1, x1 + m); y1 = Math.min(H - 1, y1 + m);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, o = document.createElement('canvas'); o.width = w; o.height = h;
+    o.getContext('2d').drawImage(c, x0, y0, w, h, 0, 0, w, h);
+    onSalvar(o.toDataURL('image/png'));
+  };
+  const bt = (bg, cor, borda) => ({ flex:1, padding:'10px 6px', borderRadius:999, border:'2px solid ' + borda, background:bg, color:cor, fontSize:13, fontWeight:700, cursor:'pointer' });
+  return ce('div', null,
+    ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:6 } }, '✍️ Assine com o dedo dentro do quadro'),
+    ce('canvas', { ref:cv, width:640, height:240, onPointerDown:ini, onPointerMove:mov, onPointerUp:fim, onPointerCancel:fim,
+      style:{ width:'100%', aspectRatio:'8 / 3', background:'#fff', border:'2px dashed #94a3b8', borderRadius:10, touchAction:'none', display:'block' } }),
+    ce('div', { style:{ display:'flex', gap:8, marginTop:8 } },
+      ce('button', { type:'button', onClick:onCancelar, style:bt('#fff', '#555', '#e5e7eb') }, 'Cancelar'),
+      ce('button', { type:'button', onClick:limpar, style:bt('#fff', '#1a3a5c', '#bfdbfe') }, 'Limpar'),
+      ce('button', { type:'button', onClick:salvar, disabled:vazio, style:{ ...bt('#1a3a5c', '#fff', '#1a3a5c'), opacity: vazio ? .4 : 1 } }, 'Salvar')));
+}
+
 function Campo({ label, children, full, centro }) {
   return ce('label', { style:{ display:'block', gridColumn: full ? '1 / -1' : 'auto' } },
     ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3, textAlign: centro ? 'center' : 'left' } }, label),
@@ -347,7 +390,7 @@ function CasaCard({ idx, regs, modo, pre, onAdd, onEdit, onQuit, onDel, onAbrir,
       ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:6, marginBottom:8 } },
         ce('button', { onClick:() => setYm(y => y - 1), style:navBtn }, '‹'),
         ce('div', { style:{ fontSize:13, fontWeight:700, color:'#1a3a5c', textAlign:'center' } },
-          '📅 Vagas ' + mesCurto + '/' + vano, ce('div', { style:{ fontWeight:400, color:'#666', fontSize:12 } }, vg.livres + ' de ' + vg.nDias + ' dias livres')),
+          '📅 Vagas ' + mesCurto + '/' + vano, ce('div', { style:{ fontWeight:400, color:'#666', fontSize:12 } }, vg.livres + (vg.livres === 1 ? ' dia livre' : ' dias livres'))),
         ce('button', { onClick:() => setYm(y => y + 1), style:navBtn }, '›')),
       vg.faixas.length
         ? ce('div', { style:{ display:'flex', flexWrap:'wrap', gap:6 } },
@@ -512,6 +555,7 @@ function App() {
   const [lista,  setLista]  = useState(null);   /* 'alugueis' | 'pendentes' | null */
   const [recibo, setRecibo] = useState(null);   /* { id, tipo: 'sinal' | 'quit' | 'total' } | null */
   const [cfgAberto, setCfgAberto] = useState(false);
+  const [assinando, setAssinando] = useState(false);
   const [cfg, setCfg] = useState(() => {
     try { const x = JSON.parse(localStorage.getItem(EMIT_KEY) || 'null'); if (x) return x; } catch (_) {}
     return { nome:'Pousada Belchior', doc:'', end:'', cidade:'' };
@@ -811,6 +855,16 @@ function App() {
         ce('label', { key:k, style:{ display:'block' } },
           ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, l),
           ce('input', { style:inputStyle, value:cfg[k] || '', onChange:e => { const val = e.target.value; setCfg(p => ({ ...p, [k]:val })); } }))),
+      ce('div', null,
+        ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, 'Assinatura (aparece em todos os recibos)'),
+        assinando
+          ? ce(PadAssinatura, { onCancelar:() => setAssinando(false), onSalvar:url => { setCfg(p => ({ ...p, assinatura:url })); setAssinando(false); } })
+          : ce('div', null,
+              cfg.assinatura && ce('div', { style:{ border:'2px solid #e5e7eb', borderRadius:10, padding:8, textAlign:'center', marginBottom:8 } },
+                ce('img', { src:cfg.assinatura, alt:'Assinatura', style:{ maxHeight:70, maxWidth:'100%' } })),
+              ce('div', { style:{ display:'flex', gap:8 } },
+                ce('button', { type:'button', onClick:() => setAssinando(true), style:{ flex:1, padding:'10px 6px', borderRadius:999, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:13, fontWeight:700, cursor:'pointer' } }, cfg.assinatura ? '✍️ Refazer assinatura' : '✍️ Assinar com o dedo'),
+                cfg.assinatura && ce('button', { type:'button', onClick:() => setCfg(p => { const { assinatura, ...resto } = p; return resto; }), style:{ padding:'10px 14px', borderRadius:999, border:'2px solid #fecaca', background:'#fff', color:'#dc2626', fontSize:13, fontWeight:700, cursor:'pointer' } }, 'Remover')))),
       ce('div', { style:{ fontSize:11, color:'#999' } }, 'Ficam salvos neste aparelho.'));
     if (!r) return envolve(ce('div', { style:{ textAlign:'center', color:'#999', padding:30 } }, 'Aluguel não encontrado.'));
 
@@ -855,8 +909,9 @@ function App() {
         sin > 0 && linha('Sinal de reserva', brl(sin)),
         linha('Valor deste recibo', brl(valor), true),
         linha('Saldo restante', brl(saldo), true)),
-      ce('div', { style:{ fontSize:14, marginBottom:34 } }, (cfg.cidade ? cfg.cidade + ', ' : '') + dataEm + '.'),
+      ce('div', { style:{ fontSize:14, marginBottom: cfg.assinatura ? 10 : 34 } }, (cfg.cidade ? cfg.cidade + ', ' : '') + dataEm + '.'),
       ce('div', { style:{ textAlign:'center' } },
+        cfg.assinatura && ce('img', { src:cfg.assinatura, alt:'Assinatura', style:{ display:'block', margin:'0 auto -8px', maxHeight:72, maxWidth:'60%' } }),
         ce('div', { style:{ borderTop:'1px solid #111', width:'70%', margin:'0 auto 4px' } }),
         ce('div', { style:{ fontSize:13, fontWeight:700 } }, cfg.nome || 'Pousada Belchior'),
         cfg.doc && ce('div', { style:{ fontSize:12 } }, cfg.doc)));
@@ -886,7 +941,7 @@ function App() {
         return ce('div', { key:c.nome, style:{ background:'#fff', borderRadius:14, padding:16, marginBottom:12, boxShadow:'0 2px 12px rgba(0,0,0,.06)', borderTop:'4px solid ' + c.cor } },
           ce('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline' } },
             ce('div', { style:{ fontWeight:700, fontSize:16, color:'#1a3a5c' } }, '🏠 ' + c.nome),
-            ce('div', { style:{ fontSize:13, fontWeight:700, color: livres.length ? '#059669' : '#dc2626' } }, livres.length + ' de ' + nDias + ' dias livres')),
+            ce('div', { style:{ fontSize:13, fontWeight:700, color: livres.length ? '#059669' : '#dc2626' } }, livres.length + (livres.length === 1 ? ' dia livre' : ' dias livres'))),
           ce('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(30px,1fr))', gap:4, margin:'12px 0' } },
             ...Array.from({ length:nDias }, (_, k) => ce('div', { key:k, style:{ textAlign:'center', padding:'5px 0', borderRadius:6, fontSize:11, fontWeight:700,
               background: ocu.has(k + 1) ? '#fee2e2' : '#ecfdf5', color: ocu.has(k + 1) ? '#dc2626' : '#059669' } }, k + 1))),

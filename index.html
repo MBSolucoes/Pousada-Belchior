@@ -175,23 +175,44 @@ const CampoSenha = React.forwardRef(function CampoSenha({ style, ...rest }, ref)
       style:{ position:'absolute', right:6, top:0, bottom:0, width:40, border:'none', background:'transparent', color: ver ? '#1a3a5c' : '#6b7280', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 } }, icone));
 });
 
-/* quadro para assinar com o dedo: devolve um PNG transparente já recortado */
+/* quadro de assinatura em tela cheia, deitado: o celular continua em pé e o quadro aparece girado (vire o aparelho para a esquerda).
+   Se o aparelho já estiver deitado, o quadro aparece normal. Devolve um PNG transparente, recortado rente ao traço. */
 function PadAssinatura({ onSalvar, onCancelar }) {
-  const cv = React.useRef(null), desenhando = React.useRef(false), ultimo = React.useRef(null);
+  const ov = React.useRef(null), cv = React.useRef(null), desenhando = React.useRef(false), ultimo = React.useRef(null);
   const [vazio, setVazio] = useState(true);
-  const pos = e => { const r = cv.current.getBoundingClientRect(); return { x:(e.clientX - r.left) * cv.current.width / r.width, y:(e.clientY - r.top) * cv.current.height / r.height }; };
+  const [dim, setDim] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const med = () => { if (!ov.current) return; const r = ov.current.getBoundingClientRect(); setDim({ w: Math.round(r.width), h: Math.round(r.height) }); };
+    med(); window.addEventListener('resize', med);
+    return () => window.removeEventListener('resize', med);
+  }, []);
+  const giro = dim.h >= dim.w;   /* em pé: gira o quadro 90°; deitado: não gira */
+  /* o bitmap tem o dobro do tamanho do quadro na tela (traço mais nítido); se o tamanho mudar, o quadro recomeça */
+  useEffect(() => {
+    const c = cv.current; if (!c || !c.offsetWidth) return;
+    if (c.dataset.w !== String(c.offsetWidth) || c.dataset.h !== String(c.offsetHeight)) {
+      c.width = c.offsetWidth * 2; c.height = c.offsetHeight * 2;
+      c.dataset.w = c.offsetWidth; c.dataset.h = c.offsetHeight; setVazio(true);
+    }
+  }, [dim.w, dim.h]);
+  /* ponto da tela → ponto do quadro (desfaz a rotação quando o quadro está girado) */
+  const pos = e => {
+    const c = cv.current;
+    const lx = giro ? e.clientY : e.clientX, ly = giro ? dim.w - e.clientX : e.clientY;
+    return { x:(lx - c.offsetLeft) * c.width / c.offsetWidth, y:(ly - c.offsetTop) * c.height / c.offsetHeight };
+  };
   const ini = e => {
     e.preventDefault();
     try { cv.current.setPointerCapture(e.pointerId); } catch (_) {}
     desenhando.current = true; const p = pos(e); ultimo.current = p;
-    const g = cv.current.getContext('2d'); g.fillStyle = '#111'; g.beginPath(); g.arc(p.x, p.y, 1.8, 0, 7); g.fill();
+    const g = cv.current.getContext('2d'); g.fillStyle = '#111'; g.beginPath(); g.arc(p.x, p.y, 3.4, 0, 7); g.fill();
     setVazio(false);
   };
   const mov = e => {
     if (!desenhando.current) return;
     e.preventDefault();
     const g = cv.current.getContext('2d'), p = pos(e);
-    g.strokeStyle = '#111'; g.lineWidth = 3.4; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.strokeStyle = '#111'; g.lineWidth = 6.8; g.lineCap = 'round'; g.lineJoin = 'round';
     g.beginPath(); g.moveTo(ultimo.current.x, ultimo.current.y); g.lineTo(p.x, p.y); g.stroke();
     ultimo.current = p;
   };
@@ -202,20 +223,25 @@ function PadAssinatura({ onSalvar, onCancelar }) {
     let x0 = W, y0 = H, x1 = 0, y1 = 0;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 10) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     if (x1 < x0) return;
-    const m = 6; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W - 1, x1 + m); y1 = Math.min(H - 1, y1 + m);
-    const w = x1 - x0 + 1, h = y1 - y0 + 1, o = document.createElement('canvas'); o.width = w; o.height = h;
-    o.getContext('2d').drawImage(c, x0, y0, w, h, 0, 0, w, h);
+    const m = 8; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W - 1, x1 + m); y1 = Math.min(H - 1, y1 + m);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, k = Math.min(1, 220 / h);   /* limita a altura para o arquivo ficar leve */
+    const o = document.createElement('canvas'); o.width = Math.max(1, Math.round(w * k)); o.height = Math.max(1, Math.round(h * k));
+    o.getContext('2d').drawImage(c, x0, y0, w, h, 0, 0, o.width, o.height);
     onSalvar(o.toDataURL('image/png'));
   };
-  const bt = (bg, cor, borda) => ({ flex:1, padding:'10px 6px', borderRadius:999, border:'2px solid ' + borda, background:bg, color:cor, fontSize:13, fontWeight:700, cursor:'pointer' });
-  return ce('div', null,
-    ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:6 } }, '✍️ Assine com o dedo dentro do quadro'),
-    ce('canvas', { ref:cv, width:640, height:240, onPointerDown:ini, onPointerMove:mov, onPointerUp:fim, onPointerCancel:fim,
-      style:{ width:'100%', aspectRatio:'8 / 3', background:'#fff', border:'2px dashed #94a3b8', borderRadius:10, touchAction:'none', display:'block' } }),
-    ce('div', { style:{ display:'flex', gap:8, marginTop:8 } },
+  const bt = (bg, cor, borda) => ({ padding:'8px 16px', borderRadius:999, border:'2px solid ' + borda, background:bg, color:cor, fontSize:14, fontWeight:700, cursor:'pointer' });
+  const palco = ce('div', { style:{ position:'absolute', top:0, left:0, width: giro ? dim.h : dim.w, height: giro ? dim.w : dim.h,
+      transformOrigin:'0 0', transform: giro ? 'translateX(' + dim.w + 'px) rotate(90deg)' : 'none',
+      background:'#fff', display:'flex', flexDirection:'column', padding:10, boxSizing:'border-box', touchAction:'none' } },
+    ce('div', { style:{ display:'flex', alignItems:'center', gap:8, marginBottom:8 } },
+      ce('div', { style:{ flex:1, fontSize:13, fontWeight:700, color:'#1a3a5c' } }, giro ? '✍️ Vire o celular para a esquerda e assine' : '✍️ Assine com o dedo'),
       ce('button', { type:'button', onClick:onCancelar, style:bt('#fff', '#555', '#e5e7eb') }, 'Cancelar'),
       ce('button', { type:'button', onClick:limpar, style:bt('#fff', '#1a3a5c', '#bfdbfe') }, 'Limpar'),
-      ce('button', { type:'button', onClick:salvar, disabled:vazio, style:{ ...bt('#1a3a5c', '#fff', '#1a3a5c'), opacity: vazio ? .4 : 1 } }, 'Salvar')));
+      ce('button', { type:'button', onClick:salvar, disabled:vazio, style:{ ...bt('#1a3a5c', '#fff', '#1a3a5c'), opacity: vazio ? .4 : 1 } }, 'Salvar')),
+    ce('canvas', { ref:cv, onPointerDown:ini, onPointerMove:mov, onPointerUp:fim, onPointerCancel:fim,
+      style:{ flex:1, minHeight:0, width:'100%', display:'block', touchAction:'none', border:'2px dashed #94a3b8', borderRadius:12, boxSizing:'border-box',
+        backgroundColor:'#fff', backgroundImage:'linear-gradient(to bottom, transparent calc(72% - 1px), #cbd5e1 calc(72% - 1px), #cbd5e1 72%, transparent 72%)' } }));
+  return ReactDOM.createPortal(ce('div', { ref:ov, style:{ position:'fixed', inset:0, zIndex:3000, background:'#fff', overflow:'hidden', touchAction:'none' } }, palco), document.body);
 }
 
 function Campo({ label, children, full, centro }) {

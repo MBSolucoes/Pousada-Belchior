@@ -453,9 +453,9 @@ function extenso(v) {
 const validos  = r => { if (r.pago > 0) return { sinal:false, quit:false, total:true }; const tot = totalR(r), rest = Math.max(0, tot - r.sinal); return { sinal: r.sinal > 0, quit: r.quit && rest > 0, total: r.quit && tot > 0 }; };
 const tipoPadrao = r => { const v = validos(r); return (v.quit && r.sinal > 0) ? 'quit' : v.total ? 'total' : 'sinal'; };
 const estavel  = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
-const SEQ_KEY  = 'pousada_belchior_recibo_seq';
-const seqSalva = () => { try { return parseInt(localStorage.getItem(SEQ_KEY) || '0', 10) || 0; } catch (_) { return 0; } };
-const proxNum  = dados => Math.max(seqSalva(), ...dados.flatMap(r => Object.values(r.rec || {}).map(x => x.n))) + 1;
+/* numeração fixa por aluguel (não depende de nenhum outro): à vista = ÚNICO, sinal = 01, quitação = 02 */
+const NUM_RECIBO = { total:0, sinal:1, quit:2 };
+const rotuloRec  = tipo => tipo === 'total' ? 'ÚNICO' : String(NUM_RECIBO[tipo]).padStart(2, '0');
 const isoHoje  = () => { const t = new Date(); return t.getFullYear() + '-' + p2(t.getMonth() + 1) + '-' + p2(t.getDate()); };
 const dataLonga = iso => { const [y, m, d] = iso.split('-'); return (+d) + ' de ' + MESES[+m - 1].toLowerCase() + ' de ' + y; };
 const EMIT_KEY = 'pousada_belchior_emitente';
@@ -632,33 +632,14 @@ function App() {
     fb.db.doc('pousada_config/emitente').set(cfg).catch(() => {});
   }, [cfg, sessao]);
 
-  /* numeração: o recibo recebe número e data na primeira vez que é aberto e depois não muda.
-     Na nuvem o número vem de um contador único (transação), para dois celulares nunca repetirem. */
+  /* o recibo guarda a data do primeiro acesso (para não mudar depois); o número vem do tipo: à vista = ÚNICO, sinal = 01, quitação = 02 */
   useEffect(() => {
     if (!recibo) return;
     const tipo = recibo.tipo;
     const r = dados.find(x => x.id === recibo.id);
     if (!r || !validos(r)[tipo] || (r.rec && r.rec[tipo])) return;
     const d = isoHoje();
-    const aplicar = n => setDados(prev => prev.map(x => x.id === r.id && !(x.rec && x.rec[tipo]) ? { ...x, rec: { ...(x.rec || {}), [tipo]: { n, d } } } : x));
-    if (fb && sessao === 'ok') {
-      const chave = r.id + tipo;
-      if (numPendRef.current[chave]) return;
-      numPendRef.current[chave] = true;
-      const ref = fb.db.doc('pousada_config/recibos');
-      fb.db.runTransaction(async t => {
-        const sn = await t.get(ref);
-        const n = Math.max(sn.exists ? sn.data().ultimo : 0, seqSalva()) + 1;
-        t.set(ref, { ultimo:n });
-        return n;
-      }).then(n => { try { localStorage.setItem(SEQ_KEY, String(n)); } catch (_) {} aplicar(n); })
-        .catch(() => setToast('⚠️ Sem internet: não foi possível numerar o recibo'))
-        .finally(() => { delete numPendRef.current[chave]; });
-      return;
-    }
-    const n = proxNum(dados);
-    try { localStorage.setItem(SEQ_KEY, String(n)); } catch (_) {}
-    aplicar(n);
+    setDados(prev => prev.map(x => x.id === r.id && !(x.rec && x.rec[tipo]) ? { ...x, rec: { ...(x.rec || {}), [tipo]: { n: NUM_RECIBO[tipo], d } } } : x));
   }, [recibo, dados, sessao]);
 
   useEffect(() => {
@@ -837,7 +818,7 @@ function App() {
     const valor = tipo === 'sinal' ? sin : tipo === 'quit' ? rest : tot;
     const saldo = tipo === 'sinal' ? rest : 0;
     const rec = r.rec && r.rec[tipo];
-    const num = rec ? String(rec.n).padStart(3, '0') : NUVEM ? '…' : String(proxNum(dados)).padStart(3, '0');
+    const num = rotuloRec(tipo);
     const dataEm = dataLonga(rec ? rec.d : isoHoje());
     const descr = tipo === 'sinal' ? 'sinal de reserva' : tipo === 'quit' ? 'pagamento do saldo restante (quitação)' : 'pagamento integral, à vista,';
     const opcoes = [['sinal','Sinal'], ['quit','Quitação'], ['total','À vista (total)']];

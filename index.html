@@ -158,6 +158,23 @@ function Toast({ msg, onDone }) {
 
 /* ─── campo de texto/valor ───────────────────────────────────────────── */
 const inputStyle = { width:'100%', padding:'10px 12px', borderRadius:9, border:'2px solid #e5e7eb', fontSize:14, outline:'none', background:'#fff' };
+/* campo de senha com o olho para mostrar/ocultar o que foi digitado */
+const CampoSenha = React.forwardRef(function CampoSenha({ style, ...rest }, ref) {
+  const [ver, setVer] = useState(false);
+  const mb = style && style.marginBottom != null ? style.marginBottom : 0;
+  const icone = ce('svg', { width:22, height:22, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+    ce('path', { d:'M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z' }),
+    ce('circle', { cx:12, cy:12, r:3 }),
+    ver && ce('path', { d:'M3 3l18 18' }));
+  return ce('div', { style:{ position:'relative', width:'100%', marginBottom:mb } },
+    ce('input', { ...rest, ref, type: ver ? 'text' : 'password', autoComplete:'off', autoCapitalize:'none', autoCorrect:'off', spellCheck:false,
+      style:{ ...style, marginBottom:0, paddingLeft:46, paddingRight:46 } }),
+    ce('button', { type:'button', 'aria-label': ver ? 'Ocultar senha' : 'Mostrar senha',
+      onPointerDown:e => e.preventDefault(),   /* não tira o foco do campo ao tocar no olho */
+      onClick:() => setVer(v => !v),
+      style:{ position:'absolute', right:6, top:0, bottom:0, width:40, border:'none', background:'transparent', color: ver ? '#1a3a5c' : '#6b7280', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 } }, icone));
+});
+
 function Campo({ label, children, full, centro }) {
   return ce('label', { style:{ display:'block', gridColumn: full ? '1 / -1' : 'auto' } },
     ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3, textAlign: centro ? 'center' : 'left' } }, label),
@@ -910,7 +927,7 @@ function App() {
         ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:8 } }, 'Tem certeza da mudança?'),
         ce('div', { style:{ fontSize:13, color:'#555', textAlign:'center', lineHeight:1.5, marginBottom:16 } },
           'O aluguel de ' + r.nome + ' (' + CASAS[r.casa].nome + ') vai de ' + (r.quit ? 'Quitado para Pendente' : 'Pendente para Quitado') + '. Digite a senha para concluir.'),
-        ce('input', { type:'password', placeholder:'Senha', value:senhaInput, autoFocus:true,
+        ce(CampoSenha, { placeholder:'Senha', value:senhaInput, autoFocus:true,
           onChange:e => { setSenhaInput(e.target.value); setSenhaErro(false); },
           onKeyDown:e => { if (e.key === 'Enter') confirmarStatus(); },
           style:{ width:'100%', padding:'11px 14px', borderRadius:999, fontSize:15, textAlign:'center', border: senhaErro ? '2px solid #ef4444' : '2px solid #e5e7eb', outline:'none', marginBottom: senhaErro ? 6 : 16 } }),
@@ -932,7 +949,7 @@ function App() {
     ce('div', { style:{ color:'#fff', fontWeight:700, fontSize:15, letterSpacing:2, margin:'8px 0 20px', textShadow:'0 2px 10px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.7)' } }, 'Balneário Magistério'),
     ce('div', { style:{ maxWidth:340, margin:'0 auto', border:'2px solid #fbbf24', borderRadius:36, padding:'16px 18px 18px', background:'rgba(8,30,50,.30)', backdropFilter:'blur(2px)', WebkitBackdropFilter:'blur(2px)' } },
       ce('div', { style:{ fontSize:'clamp(15px, 4.8vw, 19px)', fontWeight:800, letterSpacing:2, whiteSpace:'nowrap', textTransform:'uppercase', color:'#fbbf24', marginBottom:14, textShadow:'0 2px 8px rgba(0,0,0,.85), 0 0 3px rgba(0,0,0,.7)' } }, '🔒 Área restrita'),
-      ce('input', { ref:loginRef, type:'password', placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
+      ce(CampoSenha, { ref:loginRef, placeholder:'Senha de acesso', value:loginSenha, autoFocus:true, enterKeyHint:'go',
         onChange:e => { setLoginSenha(e.target.value); setLoginErro(''); },
         onKeyDown:e => { if (e.key === 'Enter') desbloquear(); },
         style:{ width:'100%', padding:'13px 14px', borderRadius:999, fontSize:16, border:'none', outline:'none', textAlign:'center', marginBottom:10 } }),
@@ -949,7 +966,7 @@ function App() {
         ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:8 } }, '🔒'),
         ce('div', { style:{ fontWeight:700, fontSize:17, textAlign:'center', color:'#1a3a5c', marginBottom:6 } }, 'Confirmar exclusão'),
         ce('div', { style:{ fontSize:13, color:'#666', textAlign:'center', marginBottom:20 } }, 'Digite a senha para apagar este lançamento.'),
-        ce('input', { type:'password', placeholder:'Senha', value:senhaInput, autoFocus:true,
+        ce(CampoSenha, { placeholder:'Senha', value:senhaInput, autoFocus:true,
           onChange:e => { setSenhaInput(e.target.value); setSenhaErro(false); },
           onKeyDown:e => { if (e.key === 'Enter') confirmarExclusao(); },
           style:{ width:'100%', padding:'11px 14px', borderRadius:9, fontSize:15, border: senhaErro ? '2px solid #ef4444' : '2px solid #e5e7eb', outline:'none', marginBottom: senhaErro ? 6 : 16 } }),

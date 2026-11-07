@@ -582,6 +582,15 @@ function App() {
   const [recibo, setRecibo] = useState(null);   /* { id, tipo: 'sinal' | 'quit' | 'total' } | null */
   const [cfgAberto, setCfgAberto] = useState(false);
   const [assinando, setAssinando] = useState(false);
+  /* data de hoje: reavaliada a cada minuto e ao voltar para o app, para virar sozinha à meia-noite */
+  const [diaHoje, setDiaHoje] = useState(isoHoje());
+  useEffect(() => {
+    const atualiza = () => setDiaHoje(isoHoje());
+    const t = setInterval(atualiza, 60000);
+    document.addEventListener('visibilitychange', atualiza);
+    window.addEventListener('focus', atualiza);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', atualiza); window.removeEventListener('focus', atualiza); };
+  }, []);
   const [cfg, setCfg] = useState(() => {
     try { const x = JSON.parse(localStorage.getItem(EMIT_KEY) || 'null'); if (x) return x; } catch (_) {}
     return { nome:'Pousada Belchior', doc:'', end:'', cidade:'' };
@@ -701,16 +710,6 @@ function App() {
     cfgSyncRef.current = j;
     fb.db.doc('pousada_config/emitente').set(cfg).catch(() => {});
   }, [cfg, sessao]);
-
-  /* o recibo guarda a data do primeiro acesso (para não mudar depois); o número vem do tipo: à vista = ÚNICO, sinal = 01, quitação = 02 */
-  useEffect(() => {
-    if (!recibo) return;
-    const tipo = recibo.tipo;
-    const r = dados.find(x => x.id === recibo.id);
-    if (!r || !validos(r)[tipo] || (r.rec && r.rec[tipo])) return;
-    const d = isoHoje();
-    setDados(prev => prev.map(x => x.id === r.id && !(x.rec && x.rec[tipo]) ? { ...x, rec: { ...(x.rec || {}), [tipo]: { n: NUM_RECIBO[tipo], d } } } : x));
-  }, [recibo, dados, sessao]);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dados)); } catch (_) {}
@@ -899,7 +898,8 @@ function App() {
     const saldo = tipo === 'sinal' ? rest : 0;
     const rec = r.rec && r.rec[tipo];
     const num = rotuloRec(tipo);
-    const dataEm = dataLonga(rec ? rec.d : isoHoje());
+    const dataRec = rec && rec.manual && rec.d ? rec.d : diaHoje;   /* automática (hoje) até alguém escolher outra data */
+    const dataEm = dataLonga(dataRec);
     const descr = tipo === 'sinal' ? 'sinal de reserva' : tipo === 'quit' ? 'pagamento do saldo restante (quitação)' : 'pagamento integral, à vista,';
     const opcoes = [['sinal','Sinal'], ['quit','Quitação'], ['total','À vista (total)']];
     const seletor = ce('div', { className:'no-print', style:{ display:'flex', gap:6, marginBottom:12 } },
@@ -908,13 +908,16 @@ function App() {
           color: tipo === k ? '#fff' : '#1a3a5c', opacity: v[k] ? 1 : .35, fontSize:12, fontWeight:700, cursor: v[k] ? 'pointer' : 'not-allowed' } }, l)));
     const dataPag = ce('label', { className:'no-print', style:{ display:'block', background:'#fff', borderRadius:12, padding:12, marginBottom:12, boxShadow:'0 2px 8px rgba(0,0,0,.06)' } },
       ce('div', { style:{ fontSize:11, color:'#888', fontWeight:700, marginBottom:3 } }, '📅 Data do pagamento (aparece no recibo)'),
-      ce('input', { type:'date', style:inputStyle, value: rec ? rec.d : isoHoje(),
+      ce('input', { type:'date', style:inputStyle, value: dataRec,
         onClick:e => { try { e.target.showPicker && e.target.showPicker(); } catch (_) {} },
         onChange:e => {
           const val = e.target.value;
-          if (!val || !rec) return;
-          setDados(prev => prev.map(x => x.id === r.id ? { ...x, rec:{ ...x.rec, [tipo]:{ ...x.rec[tipo], d:val } } } : x));
-        } }));
+          if (!val) return;
+          setDados(prev => prev.map(x => x.id === r.id ? { ...x, rec:{ ...(x.rec || {}), [tipo]:{ n:NUM_RECIBO[tipo], d:val, manual:true } } } : x));
+        } }),
+      rec && rec.manual && ce('button', { type:'button',
+        onClick:() => setDados(prev => prev.map(x => { if (x.id !== r.id || !x.rec) return x; const { [tipo]:_, ...resto } = x.rec; return { ...x, rec:resto }; })),
+        style:{ marginTop:8, padding:'7px 12px', borderRadius:999, border:'2px solid #bfdbfe', background:'#fff', color:'#1d4ed8', fontSize:12, fontWeight:700, cursor:'pointer' } }, '↺ Voltar para a data de hoje (automática)'));
     if (!v[tipo]) return envolve(painel, seletor, ce('div', { style:{ textAlign:'center', color:'#999', padding:30, fontSize:14 } }, 'Não há pagamento registrado para este tipo de recibo.'));
 
     const linha = (k, val, forte) => ce('div', { key:k, style:{ display:'flex', justifyContent:'space-between', padding:'3px 0', fontWeight: forte ? 700 : 400 } }, ce('span', null, k), ce('span', null, val));

@@ -694,6 +694,48 @@ function App() {
     [...mapa.keys()].forEach(id => { if (!ids.has(id)) { mapa.delete(id); fb.db.collection(COLECAO).doc(id).delete().catch(() => {}); } });
   }, [dados, sessao]);
 
+  /* ── aviso: outro aparelho com o app aberto ──
+     Cada aparelho com o app visível grava um sinal de vida a cada 10 s em pousada_config/presenca (mesma área do emitente).
+     Sinal que parou de mudar por 30 s, ou aparelho que saiu do app (sai na hora), deixa de contar. */
+  const meuId = React.useRef(null);
+  if (!meuId.current) {
+    try { let id = localStorage.getItem('pousada_dev_id'); if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('pousada_dev_id', id); } meuId.current = id; }
+    catch (_) { meuId.current = Math.random().toString(36).slice(2, 10); }
+  }
+  const [outros, setOutros] = useState(0);
+  const [avisoFechado, setAvisoFechado] = useState(0);   /* quantidade de aparelhos quando o aviso foi dispensado */
+  const outrosAntes = React.useRef(0), erroPresenca = React.useRef(false);
+  useEffect(() => {
+    if (!fb || sessao !== 'ok') return;
+    const ref = fb.db.doc('pousada_config/presenca'), id = meuId.current, vistos = new Map();
+    const falhou = e => { if (e && e.code === 'permission-denied' && !erroPresenca.current) { erroPresenca.current = true; setToast('⚠️ O aviso de outros aparelhos não está liberado nas regras do Firebase'); } };
+    const bater = () => { if (!document.hidden) ref.set({ [id]: { t: Date.now() } }, { merge:true }).catch(falhou); };
+    const sair  = () => { ref.update({ [id]: firebase.firestore.FieldValue.delete() }).catch(() => {}); };
+    const contar = () => { const agora = Date.now(); let n = 0; vistos.forEach(v => { if (agora - v.visto < 30000) n++; }); setOutros(n); };
+    const unsub = ref.onSnapshot(sn => {
+      const d = sn.exists ? sn.data() : {}, agora = Date.now();
+      vistos.forEach((_, k) => { if (!(k in d)) vistos.delete(k); });
+      Object.entries(d).forEach(([k, v]) => {
+        if (k === id || !v) return;
+        const ant = vistos.get(k);
+        if (!ant) vistos.set(k, { tok:v.t, visto: Math.abs(agora - v.t) < 30000 ? agora : 0 });   /* 1ª leitura: vale só se o sinal for recente */
+        else if (ant.tok !== v.t) { ant.tok = v.t; ant.visto = agora; }                           /* sinal mudou = aparelho vivo */
+      });
+      contar();
+    }, falhou);
+    bater();
+    const t1 = setInterval(bater, 10000), t2 = setInterval(contar, 5000);
+    const vis = () => { if (document.hidden) sair(); else bater(); };
+    document.addEventListener('visibilitychange', vis);
+    window.addEventListener('pagehide', sair);
+    return () => { unsub(); clearInterval(t1); clearInterval(t2); document.removeEventListener('visibilitychange', vis); window.removeEventListener('pagehide', sair); sair(); };
+  }, [sessao]);
+  useEffect(() => {
+    if (outros > 0 && outrosAntes.current === 0) { setToast('⚠️ O app foi aberto em outro aparelho'); try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (_) {} }
+    if (outros === 0) setAvisoFechado(0);
+    outrosAntes.current = outros;
+  }, [outros]);
+
   /* ── nuvem: dados do emitente compartilhados ── */
   useEffect(() => {
     if (!fb || sessao !== 'ok') return;
@@ -1028,6 +1070,9 @@ function App() {
   const congelado = true;   /* em todas as telas: cabeçalho e abas fixos, só o conteúdo rola */
   return ce('div', { className: congelado ? 'app-frozen' : undefined, style: congelado ? { background:'#F8F5F0' } : { minHeight:'100vh', background:'#F8F5F0', paddingBottom:32 } },
     toast && ce(Toast, { key:toast, msg:toast, onDone:() => setToast(null) }),
+    outros > 0 && avisoFechado !== outros && ce('div', { style:{ flex:'none', display:'flex', alignItems:'center', gap:8, background:'#fef3c7', borderBottom:'2px solid #f59e0b', color:'#92400e', padding:'8px 12px', fontSize:13, fontWeight:700 } },
+      ce('div', { style:{ flex:1, textAlign:'center' } }, outros === 1 ? '⚠️ O app está aberto em outro aparelho agora. Confira as vagas antes de lançar.' : '⚠️ O app está aberto em ' + outros + ' outros aparelhos agora. Confira as vagas antes de lançar.'),
+      ce('button', { type:'button', 'aria-label':'Fechar aviso', onClick:() => setAvisoFechado(outros), style:{ border:'none', background:'transparent', color:'#92400e', fontSize:18, fontWeight:700, cursor:'pointer', padding:'0 4px' } }, '✕')),
     modalExcluir && ce('div', { style:{ position:'fixed', inset:0, background:'rgba(0,0,0,.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 } },
       ce('div', { style:{ background:'#fff', borderRadius:16, padding:28, width:'100%', maxWidth:320, boxShadow:'0 8px 40px rgba(0,0,0,.25)' } },
         ce('div', { style:{ fontSize:28, textAlign:'center', marginBottom:8 } }, '🔒'),
